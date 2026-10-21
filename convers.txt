@@ -1,0 +1,957 @@
+ ▐▛███▛█   Claude Code v2.1.306
+▝▜██████▀  Sonnet 5.5 · Amazon Bedrock
+ ▝▝   ▝▝   /workshop/shopping-cart
+
+
+❯ I want to add a discount code feature to the cart. What files need to change? 
+  Create a plan and save it to the docs folder.                                 
+
+● Explore(Explore cart code structure)
+  ⎿  Backgrounded agent (↓ to manage · ctrl+o to expand)
+
+● The Explore agent is still mapping the cart code. I'll wait for it to finish
+  before drafting the plan.
+
+✻ Cooked for 5s · done 5:00 PM
+
+● Agent "Explore cart code structure" finished · 34s
+
+● Updated plan
+  ⎿  /plan to preview
+  ⎿  User rejected Claude's plan:
+     ╭─────────────────────────────────────────────────────────────────────────╮
+     │ Discount Code Feature – Implementation Plan                             │
+     │                                                                         │
+     │ Context                                                                 │
+     │                                                                         │
+     │ The cart (Flask on Lambda + React/Vite, DynamoDB) computes              │
+     │ subtotal/tax/total in the backend only and has no concept of discounts. │
+     │ Add the ability to apply a discount code to the cart, reflect it in     │
+     │ totals, and persist it on the order. Final deliverable of this plan:    │
+     │ copy to docs/discount-code-plan.md (plan mode blocks writing there now; │
+     │ do it on approval).                                                     │
+     │                                                                         │
+     │ Design decisions (defaults, adjust if needed)                           │
+     │                                                                         │
+     │ - Code definitions: stored in a new DiscountsTable (hash key code;      │
+     │   attrs type = percent|fixed, value, active, optional expiresAt),       │
+     │   seeded on first read like ProductService._seed_products (e.g. SAVE10  │
+     │   10%, FIVEOFF $5).                                                     │
+     │ - Applied code: stored per session in the existing Cart table as a      │
+     │   sentinel item (productId = "__discount__")? That pollutes get_items.  │
+     │   Recommended instead: new attribute-free approach — put it in the      │
+     │   Discounts table? Simplest clean choice: a separate appliedCode record │
+     │   in the Cart table with sentinel key, filtered out in                  │
+     │   CartModel.get_items. Single code per cart.                            │
+     │ - Math: discount applies to subtotal; tax computed on discounted        │
+     │   subtotal; discount capped at subtotal. Centralize the 8% rate and     │
+     │   rounding in one helper (currently duplicated in cart_service.get_cart │
+     │   and order_service.create_order).                                      │
+     │ - Order creation re-validates the code server-side; never trust client  │
+     │   totals.                                                               │
+     │                                                                         │
+     │ Files to change                                                         │
+     │                                                                         │
+     │ Backend                                                                 │
+     │                                                                         │
+     │ - template.yaml – add DiscountsTable resource, DISCOUNTS_TABLE env var, │
+     │   DynamoDBCrudPolicy.                                                   │
+     │ - backend/models/discount.py (new) – table wrapper, copy                │
+     │   _serialize/_deserialize pattern from models/cart.py.                  │
+     │ - backend/models/cart.py – get/set/clear applied code; make get_items   │
+     │   skip the sentinel; add explicit Key import (currently relies on       │
+     │   order.py).                                                            │
+     │ - backend/services/discount_service.py (new) – validate(code),          │
+     │   calculate(subtotal, discount), seeding.                               │
+     │ - backend/services/cart_service.py – get_cart returns discountCode,     │
+     │   discount, tax on discounted subtotal; add                             │
+     │   apply_discount/remove_discount; use shared totals helper.             │
+     │ - backend/services/order_service.py – accept discount, use shared       │
+     │   totals helper, store discountCode + discount.                         │
+     │ - backend/models/order.py – add discount to the Decimal key lists in    │
+     │   _serialize/_deserialize.                                              │
+     │ - backend/routes/cart.py – POST /api/cart/discount (body {code}; 400    │
+     │   missing/invalid/expired) and DELETE /api/cart/discount, per           │
+     │   docs/api-standards.md (validate input, {"error": ...}, try/except +   │
+     │   logging, no boto3 in routes).                                         │
+     │ - backend/routes/orders.py – pass the cart's discount to                │
+     │   order_service.create_order; clear the applied code after the order    │
+     │   (alongside clear_cart).                                               │
+     │ - backend/services/cart_service.py clear_cart should also remove the    │
+     │   applied code.                                                         │
+     │                                                                         │
+     │ Frontend                                                                │
+     │                                                                         │
+     │ - frontend/src/services/api.js – applyDiscount(code), removeDiscount(). │
+     │ - frontend/src/context/CartContext.jsx – applyDiscount/removeDiscount   │
+     │   (call API, then fetchCart()); add discount, discountCode to initial   │
+     │   state.                                                                │
+     │ - frontend/src/pages/CartPage.jsx – code input + Apply button,          │
+     │   applied-code chip with remove, "Discount" row in .cart-summary; show  │
+     │   errors inline (not alert).                                            │
+     │ - frontend/src/pages/OrdersPage.jsx – optionally show discount on past  │
+     │   orders.                                                               │
+     │ - frontend/src/styles.css – styles for the input/chip/discount row.     │
+     │                                                                         │
+     │ Tests & docs                                                            │
+     │                                                                         │
+     │ - backend/requirements.txt + backend/tests/ (new; none exist despite    │
+     │   README) – pytest + moto; test_discount_service.py,                    │
+     │   test_cart_service.py (totals with percent/fixed/cap/invalid/expired), │
+     │   order creation with discount.                                         │
+     │ - README.md – add endpoints to table and files to structure tree.       │
+     │ - docs/discount-code-plan.md – this plan.                               │
+     │                                                                         │
+     │ Verification                                                            │
+     │                                                                         │
+     │ 1. pytest backend/tests passes (percent, fixed, cap at subtotal,        │
+     │    invalid, expired, remove, order stores discount).                    │
+     │ 2. Run backend locally (flask run, port 5000) + npm run dev in          │
+     │    frontend/: add items, apply SAVE10 → discount row and lower          │
+     │    tax/total; remove code → totals revert; bad code → inline error.     │
+     │ 3. Check out with a code → order shows discount; cart clears and code   │
+     │    is cleared.                                                          │
+     │ 4. sam validate / sam build for the template change; deploy via         │
+     │    deploy.sh and smoke-test the API.                                    │
+     │                                                                         │
+     │ Open questions                                                          │
+     │                                                                         │
+     │ - Tax before/after discount (assumed after).                            │
+     │ - One code per cart (assumed) and whether codes need usage limits.      │
+     ╰─────────────────────────────────────────────────────────────────────────╯
+
+✻ Worked for 9m 53s · done 5:10 PM
+
+※ recap: We're planning a discount code feature for the shopping cart, and I've sent an Explore agent to map the cart's backend, frontend, and totals logic. Next I'll use its findings to write the plan, then ask for your approval to save it to docs. (disable recaps in /config)
+
+❯ /init                                                                         
+
+  Read 2 files, listed 1 directory (ctrl+o to expand)
+
+● I haven't created CLAUDE.md yet. Plan mode is still on, because you rejected
+  the plan-approval step. While it's on, I can only edit the plan file, so I
+  can't write CLAUDE.md or docs/discount-code-plan.md.
+
+  I've read the README, deploy.sh and package.json. There are no Cursor or
+  Copilot rules in the repo. The CLAUDE.md would cover:
+
+  - Commands:
+    - Backend: pip install -r requirements.txt, then python app.py. It serves on
+      port 5000.
+    - Frontend: npm install and npm run dev in frontend/. The dev server is on
+      port 3000 and proxies /api to localhost:5000.
+    - Deploy: ./deploy.sh runs sam build, sam deploy for the shopping-cart
+      stack, builds the frontend with VITE_API_URL, and syncs it to S3.
+    - Tests and lint: there is no test runner or linter. The README mentions
+      backend/tests/test_cart_service.py, but that file doesn't exist.
+  - Architecture:
+    - Request path: React → API Gateway → one Lambda running Flask through
+      serverless-wsgi → three DynamoDB tables.
+    - The backend layers are routes → services → models. docs/api-standards.md
+      says routes must not import boto3.
+    - Every route uses the hardcoded session "workshop-user", so there is no
+      auth.
+    - Tax (8%) is calculated separately in cart_service.get_cart and
+      order_service.create_order.
+    - A new DynamoDB table needs three changes in template.yaml: the resource,
+      an env var, and a CRUD policy.
+    - OrderModel converts only subtotal, tax and total to and from Decimal, so
+      any new money field must be added there.
+    - Cart state lives in CartContext. Every mutation calls the API and then
+      refetches the cart.
+
+  You have two ways forward:
+  1. Leave plan mode, then I write CLAUDE.md. I'd also save the discount plan to
+     docs/, if you still want it.
+  2. Stay in plan mode. Tell me what to change in the plan, or whether you want
+     CLAUDE.md added to it.
+
+  Which do you want?
+
+✻ Churned for 13s · done 5:51 PM
+
+❯ 1                                                                             
+
+● Write(CLAUDE.md)
+  ⎿  Wrote 36 lines to CLAUDE.md
+      1 # CLAUDE.md
+      2 
+      3 This file provides guidance to Claude Code (claude.ai/code) when 
+        working with code in this repository.
+      4 
+      5 ## Commands
+      6 
+      7 ```bash
+      8 # Backend (Flask, serves on :5000)
+      9 cd backend && pip install -r requirements.txt && python app.py
+     … +49 lines (ctrl+o to expand)
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● I created both files:
+
+  - CLAUDE.md is at the repo root. It has the dev and deploy commands, a note
+    that there are no tests or linter, and the cross-file architecture points.
+  - docs/discount-code-plan.md is the discount-code plan, copied unchanged from
+    the plan file. The plan's "Applied code" bullet still has some rambling
+    back-and-forth. Its recommendation is a sentinel row in the Cart table that
+    CartModel.get_items filters out.
+
+  I haven't committed anything, and no application code has changed.
+
+  The plan assumes tax is calculated after the discount and that a cart holds
+  one code. Say so if you want either handled differently before I start
+  building.
+
+✻ Cogitated for 11s · done 5:52 PM
+
+※ recap: We're planning a discount code feature for the shopping cart; the plan is saved to docs/discount-code-plan.md and a CLAUDE.md now exists. Next, you confirm the plan's assumptions (tax after discount, one code per cart) so I can start building. (disable recaps in /config)
+
+❯ Create a .claude/rules/react-components.md file with paths scoped to          
+  "frontend/**/*.jsx". Add rules: use functional components only, destructure   
+  props in the function signature, keep components under 100 lines, and no      
+  inline styles.                                                                
+
+● Write(.claude/rules/react-components.md)
+  ⎿  Wrote 11 lines to .claude/rules/react-components.md
+       1 ---
+       2 paths:
+       3   - "frontend/**/*.jsx"
+       5 
+       6 # React component rules
+       7 
+       8 - Use functional components only. No class components.
+         rtItem({ item, onRemove })`.
+      10 - Keep components under 100 lines. Split larger ones into smalle
+         r components or hooks.
+     … +4 lines (ctrl+o to expand)
+
+● I created .claude/rules/react-components.md scoped to frontend/**/*.jsx with
+  your four rules (functional components, destructured props, <100 lines, no
+  inline styles) — note that CartPage.jsx and others already violate the
+  no-inline-styles rule. I'm now requesting approval of the discount-code plan
+  to leave plan mode. · summary
+
+● User approved Claude's plan
+  ⎿  Plan saved to: ~/.claude/plans/i-want-to-add-steady-abelson.md · /plan to 
+     edit
+     Discount Code Feature – Implementation Plan
+
+     Context
+
+     The cart (Flask on Lambda + React/Vite, DynamoDB) computes
+     subtotal/tax/total in the backend only and has no concept of discounts. Add
+     the ability to apply a discount code to the cart, reflect it in totals,
+     and persist it on the order. Final deliverable of this plan: copy to
+     docs/discount-code-plan.md (plan mode blocks writing there now; do it on
+     approval).
+
+     Design decisions (defaults, adjust if needed)
+
+     - Code definitions: stored in a new DiscountsTable (hash key code; attrs
+       type = percent|fixed, value, active, optional expiresAt), seeded on first
+       read like ProductService._seed_products (e.g. SAVE10 10%, FIVEOFF $5).
+     - Applied code: stored per session in the existing Cart table as a sentinel
+       item (productId = "__discount__")? That pollutes get_items. Recommended
+       instead: new attribute-free approach — put it in the Discounts table?
+       Simplest clean choice: a separate appliedCode record in the Cart table 
+       with sentinel key, filtered out in CartModel.get_items. Single code per
+       cart.
+     - Math: discount applies to subtotal; tax computed on discounted subtotal;
+       discount capped at subtotal. Centralize the 8% rate and rounding in one
+       helper (currently duplicated in cart_service.get_cart and
+       order_service.create_order).
+     - Order creation re-validates the code server-side; never trust client
+       totals.
+
+     Files to change
+
+     Backend
+
+     - template.yaml – add DiscountsTable resource, DISCOUNTS_TABLE env var,
+       DynamoDBCrudPolicy.
+     - backend/models/discount.py (new) – table wrapper, copy
+       _serialize/_deserialize pattern from models/cart.py.
+     - backend/models/cart.py – get/set/clear applied code; make get_items skip
+       the sentinel; add explicit Key import (currently relies on order.py).
+     - backend/services/discount_service.py (new) – validate(code),
+       calculate(subtotal, discount), seeding.
+     - backend/services/cart_service.py – get_cart returns discountCode,
+       discount, tax on discounted subtotal; add apply_discount/remove_discount;
+       use shared totals helper.
+     - backend/services/order_service.py – accept discount, use shared totals
+       helper, store discountCode + discount.
+     - backend/models/order.py – add discount to the Decimal key lists in
+       _serialize/_deserialize.
+     - backend/routes/cart.py – POST /api/cart/discount (body {code}; 400
+       missing/invalid/expired) and DELETE /api/cart/discount, per
+       docs/api-standards.md (validate input, {"error": ...}, try/except +
+       logging, no boto3 in routes).
+     - backend/routes/orders.py – pass the cart's discount to
+       order_service.create_order; clear the applied code after the order
+       (alongside clear_cart).
+     - backend/services/cart_service.py clear_cart should also remove the
+       applied code.
+
+     Frontend
+
+     - frontend/src/services/api.js – applyDiscount(code), removeDiscount().
+     - frontend/src/context/CartContext.jsx – applyDiscount/removeDiscount (call
+       API, then fetchCart()); add discount, discountCode to initial state.
+     - frontend/src/pages/CartPage.jsx – code input + Apply button, applied-code
+       chip with remove, "Discount" row in .cart-summary; show errors inline
+       (not alert).
+     - frontend/src/pages/OrdersPage.jsx – optionally show discount on past
+       orders.
+     - frontend/src/styles.css – styles for the input/chip/discount row.
+
+     Tests & docs
+
+     - backend/requirements.txt + backend/tests/ (new; none exist despite
+       README) – pytest + moto; test_discount_service.py, test_cart_service.py
+       (totals with percent/fixed/cap/invalid/expired), order creation with
+       discount.
+     - README.md – add endpoints to table and files to structure tree.
+     - docs/discount-code-plan.md – this plan.
+
+     Verification
+
+     1. pytest backend/tests passes (percent, fixed, cap at subtotal, invalid,
+        expired, remove, order stores discount).
+     2. Run backend locally (flask run, port 5000) + npm run dev in frontend/:
+        add items, apply SAVE10 → discount row and lower tax/total; remove code
+        → totals revert; bad code → inline error.
+     3. Check out with a code → order shows discount; cart clears and code is
+        cleared.
+     4. sam validate / sam build for the template change; deploy via deploy.sh
+        and smoke-test the API.
+
+     Open questions
+
+     - Tax before/after discount (assumed after).
+     - One code per cart (assumed) and whether codes need usage limits.
+
+● The plan is approved, so I'm starting on the backend. First I'll read the
+  files I'm about to change.
+
+  Read 1 file, ran 1 shell command (ctrl+o to expand)
+
+● Now the template: the new table, the env var and the policy.
+
+● Update(template.yaml)
+  ⎿  Added 12 lines
+      72          - AttributeName: orderId
+      73            KeyType: RANGE
+      74  
+      75 +  DiscountsTable:                                              
+      76 +    Type: AWS::DynamoDB::Table                                 
+      77 +    Properties:                                                
+      78 +      TableName: !Sub ${AWS::StackName}-discounts              
+      79 +      BillingMode: PAY_PER_REQUEST                             
+      80 +      AttributeDefinitions:                                    
+      81 +        - AttributeName: code                                  
+      82 +          AttributeType: S                                     
+      83 +      KeySchema:                                               
+      84 +        - AttributeName: code                                  
+      85 +          KeyType: HASH                                        
+      86 +                                                               
+      87    # ========================================
+      88    # Lambda Function (Flask API behind API Gateway)
+      89    # ========================================
+
+● Update(template.yaml)
+  ⎿  Added 1 line
+       97            PRODUCTS_TABLE: !Ref ProductsTable
+       98            CART_TABLE: !Ref CartTable
+       99            ORDERS_TABLE: !Ref OrdersTable
+      100 +          DISCOUNTS_TABLE: !Ref DiscountsTable                
+      101        Policies:
+      102          - DynamoDBCrudPolicy:
+      103              TableName: !Ref ProductsTable
+
+● Update(template.yaml)  ⎿  Added 2 lines
+      105              TableName: !Ref CartTable
+      106          - DynamoDBCrudPolicy:
+      107              TableName: !Ref OrdersTable
+      108 +        - DynamoDBCrudPolicy:                                 
+      109 +            TableName: !Ref DiscountsTable                    
+      110        Events:
+      111          ProxyApi:
+      112            Type: Api
+
+● Write(backend/models/discount.py)
+  ⎿  Wrote 33 lines to backend/models/discount.py
+       1 import os
+       2 import boto3
+       3 from decimal import Decimal
+       4 
+       5 
+       7 
+       8     def __init__(self):
+       9         dynamodb = boto3.resource("dynamodb")
+      10         self.table = dynamodb.Table(os.environ["DISCOUNTS_TABLE"
+         ])
+     … +23 lines (ctrl+o to expand)
+
+● Next, the cart model: a sentinel row for the applied code, hidden from
+  get_items.
+
+● Update(backend/models/cart.py)
+  ⎿  Added 24 lines, removed 2 lines
+       1  import os
+       2  import boto3
+       3  from decimal import Decimal
+       4 +from boto3.dynamodb.conditions import Key                      
+       5  
+       6 +DISCOUNT_KEY = "__discount__"                                  
+       7  
+       8 +                                                               
+       9  class CartModel:
+      10  
+      11      def __init__(self):
+     ...
+      14  
+      15      def get_items(self, session_id):
+      16          response = self.table.query(
+      14 -            KeyConditionExpression=boto3.dynamodb.conditions.Ke
+         -y("sessionId").eq(session_id)                                  
+      17 +            KeyConditionExpression=Key("sessionId").eq(session_
+         +id)                                                            
+      18          )
+      16 -        return [self._serialize(item) for item in response["Ite
+         -ms"]]                                                          
+      19 +        return [                                               
+      20 +            self._serialize(item)                              
+      21 +            for item in response["Items"]                      
+      22 +            if item["productId"] != DISCOUNT_KEY               
+      23 +        ]                                                      
+      24  
+      25 +    def get_discount_code(self, session_id):                   
+      26 +        response = self.table.get_item(                        
+      27 +            Key={"sessionId": session_id, "productId": DISCOUNT
+         +_KEY}                                                          
+      28 +        )                                                      
+      29 +        item = response.get("Item")                            
+      30 +        return item["code"] if item else None                  
+      31 +                                                               
+      32 +    def set_discount_code(self, session_id, code):             
+      33 +        self.table.put_item(                                   
+      34 +            Item={"sessionId": session_id, "productId": DISCOUN
+         +T_KEY, "code": code}                                           
+      35 +        )                                                      
+      36 +                                                               
+      37 +    def clear_discount_code(self, session_id):                 
+      38 +        self.delete_item(session_id, DISCOUNT_KEY)             
+      39 +                                                               
+      40      def get_item(self, session_id, product_id):
+      41          response = self.table.get_item(
+      42              Key={"sessionId": session_id, "productId": product_
+          id}
+
+● Update(backend/models/cart.py)
+  ⎿  Added 1 line
+      64          items = self.get_items(session_id)
+      65          for item in items:
+      66              self.delete_item(session_id, item["productId"])
+      67 +        self.clear_discount_code(session_id)                   
+      68  
+      69      def _serialize(self, item):
+      70          if not item:
+
+● Update(backend/models/order.py)
+  ⎿  Added 1 line, removed 1 line
+      29  
+      30      def _deserialize(self, order):
+      31          db_item = {**order}
+      32 -        for key in ["subtotal", "tax", "total"]:               
+      32 +        for key in ["subtotal", "discount", "tax", "total"]:   
+      33              if key in db_item:
+      34                  db_item[key] = Decimal(str(db_item[key]))
+      35          if "items" in db_item:
+
+● Update(backend/models/order.py)
+  ⎿  Added 1 line, removed 1 line
+      42          if not item:
+      43              return None
+      44          result = {**item}
+      45 -        for key in ["subtotal", "tax", "total"]:               
+      45 +        for key in ["subtotal", "discount", "tax", "total"]:   
+      46              if key in result:
+      47                  result[key] = float(result[key])
+      48          if "items" in result:
+
+● Now the shared totals helper and the discount service.
+
+● Write(backend/services/pricing.py)
+  ⎿  Wrote 22 lines to backend/services/pricing.py
+      1 from decimal import Decimal, ROUND_HALF_UP
+      2 
+      3 TAX_RATE = Decimal("0.08")
+      4 CENT = Decimal("0.01")
+      5 
+      6 
+      7 def _round(amount):
+      8     return amount.quantize(CENT, rounding=ROUND_HALF_UP)
+      9 
+     … +13 lines (ctrl+o to expand)
+
+● Write(backend/services/discount_service.py)
+  ⎿  Wrote 49 lines to backend/services/discount_service.py
+      1 from datetime import datetime, timezone
+      2 from decimal import Decimal
+      3 from models.discount import DiscountModel
+      4 
+      5 
+      6 class DiscountService:
+      7 
+      8     def __init__(self):
+      9         self.model = DiscountModel()
+     … +45 lines (ctrl+o to expand)
+
+● Now cart_service: totals, apply_discount, remove_discount.
+
+● Update(backend/services/cart_service.py)
+  ⎿  Added 31 lines, removed 3 lines
+      1  from decimal import Decimal
+      2  from models.cart import CartModel
+      3 +from services.discount_service import DiscountService           
+      4 +from services.pricing import compute_totals                     
+      5  from services.product_service import ProductService
+      6  
+      7  
+     ...
+      10      def __init__(self):
+      11          self.model = CartModel()
+      12          self.product_service = ProductService()
+      13 +        self.discount_service = DiscountService()              
+      14  
+      15      def get_cart(self, session_id):
+      16          items = self.model.get_items(session_id)
+     ...
+      19          )
+      20          item_count = sum(int(item["quantity"]) for item in item
+          s)
+      21  
+      22 +        discount_code, discount_amount = self._active_discount(
+         +session_id, subtotal)                                          
+      23 +                                                               
+      24          return {
+      25              "items": items,
+      26              "itemCount": item_count,
+      22 -            "subtotal": float(subtotal),                       
+      23 -            "tax": float(subtotal * Decimal("0.08")),          
+      24 -            "total": float(subtotal * Decimal("1.08")),        
+      27 +            "discountCode": discount_code,                     
+      28 +            **compute_totals(subtotal, discount_amount),       
+      29          }
+      30  
+      31 +    def apply_discount(self, session_id, code):                
+      32 +        discount = self.discount_service.validate(code)        
+      33 +        if "error" in discount:                                
+      34 +            return discount                                    
+      35 +                                                               
+      36 +        self.model.set_discount_code(session_id, discount["code
+         +"])                                                            
+      37 +        return {"message": f"Applied {discount['code']}", "cart
+         +": self.get_cart(session_id)}                                  
+      38 +                                                               
+      39 +    def remove_discount(self, session_id):                     
+      40 +        self.model.clear_discount_code(session_id)             
+      41 +        return {"message": "Discount removed", "cart": self.get
+         +_cart(session_id)}                                             
+      42 +                                                               
+      43 +    def _active_discount(self, session_id, subtotal):          
+      44 +        """Re-validate the stored code on every read so expired
+         + codes stop applying."""                                       
+      45 +        code = self.model.get_discount_code(session_id)        
+      46 +        if not code:                                           
+      47 +            return None, 0                                     
+      48 +                                                               
+      49 +        discount = self.discount_service.validate(code)        
+      50 +        if "error" in discount:                                
+      51 +            self.model.clear_discount_code(session_id)         
+      52 +            return None, 0                                     
+      53 +        return code, self.discount_service.amount(discount, sub
+         +total)                                                         
+      54 +                                                               
+      55      def add_item(self, session_id, product_id, quantity=1):
+      56          product = self.product_service.get_by_id(product_id)
+      57          if not product:
+
+● Write(backend/services/order_service.py)
+  ⎿  Added 9 lines, removed 6 lines
+      1  import uuid
+      2  from datetime import datetime, timezone
+      3  from models.order import OrderModel
+      4 +from services.pricing import compute_totals                     
+      5  
+      6  
+      7  class OrderService:
+     ...
+       9      def __init__(self):
+      10          self.model = OrderModel()
+      11  
+      11 -    def create_order(self, session_id, items, subtotal, shippin
+         -g_address):                                                    
+      12 +    def create_order(self, session_id, items, subtotal, shippin
+         +g_address, discount=0, discount_code=None):                    
+      13          order_id = str(uuid.uuid4())[:8]
+      13 -        tax = round(subtotal * 0.08, 2)                        
+      14 -        total = round(subtotal + tax, 2)                       
+      14 +        totals = compute_totals(subtotal, discount)            
+      15  
+      16          order = {
+      17              "sessionId": session_id,
+      18              "orderId": order_id,
+      19              "items": items,
+      20 -            "subtotal": str(subtotal),                         
+      21 -            "tax": str(tax),                                   
+      22 -            "total": str(total),                               
+      20 +            "subtotal": str(totals["subtotal"]),               
+      21 +            "discount": str(totals["discount"]),               
+      22 +            "tax": str(totals["tax"]),                         
+      23 +            "total": str(totals["total"]),                     
+      24              "shippingAddress": shipping_address,
+      25              "status": "confirmed",
+      26              "createdAt": datetime.now(timezone.utc).isoformat()
+          ,
+      27          }
+      28 +        if discount_code:                                      
+      29 +            order["discountCode"] = discount_code              
+      30  
+      31          self.model.put(order)
+      32          return order
+
+● Update(backend/routes/orders.py)
+  ⎿  Added 2 lines
+      26          items=cart["items"],
+      27          subtotal=cart["subtotal"],
+      28          shipping_address=shipping_address,
+      29 +        discount=cart["discount"],                             
+      30 +        discount_code=cart["discountCode"],                    
+      31      )
+      32  
+      33      cart_service.clear_cart(SESSION_ID)
+
+● Update(backend/routes/cart.py)
+  ⎿  Added 18 lines
+      57      return jsonify(result)
+      58  
+      59  
+      60 +@cart_bp.route("/discount", methods=["POST"])                  
+      61 +def apply_discount():                                          
+      62 +    body = request.get_json(silent=True)                       
+      63 +    code = body.get("code") if isinstance(body, dict) else None
+      64 +    if not isinstance(code, str) or not code.strip():          
+      65 +        return jsonify({"error": "code is required"}), 400     
+      66 +                                                               
+      67 +    result = cart_service.apply_discount(SESSION_ID, code)     
+      68 +    if "error" in result:                                      
+      69 +        return jsonify(result), 400                            
+      70 +    return jsonify(result)                                     
+      71 +                                                               
+      72 +                                                               
+      73 +@cart_bp.route("/discount", methods=["DELETE"])                
+      74 +def remove_discount():                                         
+      75 +    return jsonify(cart_service.remove_discount(SESSION_ID))   
+      76 +                                                               
+      77 +                                                               
+      78  @cart_bp.route("", methods=["DELETE"])
+      79  def clear_cart():
+      80      cart_service.clear_cart(SESSION_ID)
+
+● The backend is in place. Next I'll read the frontend files before changing
+  them.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● The cart page already uses inline styles, but the new rule says not to add
+  more. So the discount UI goes in a new DiscountCodeForm component that uses
+  CSS classes. First the API client and context.
+
+● Update(frontend/src/services/api.js)
+  ⎿  Added 8 lines
+      49  
+      50  export const clearCart = () => request('/cart', { method: 'DELE
+          TE' });
+      51  
+      52 +export const applyDiscount = (code) =>                         
+      53 +  request('/cart/discount', {                                  
+      54 +    method: 'POST',                                            
+      55 +    body: JSON.stringify({ code }),                            
+      56 +  });                                                          
+      57 +                                                               
+      58 +export const removeDiscount = () => request('/cart/discount', {
+         + method: 'DELETE' });                                          
+      59 +                                                               
+      60  // Order endpoints
+      61  export const createOrder = (shippingAddress) =>
+      62    request('/orders', {
+
+● Update(frontend/src/context/CartContext.jsx)
+  ⎿  Added 3 lines, removed 1 line
+       4  const CartContext = createContext();
+       5  
+       6  export function CartProvider({ children }) {
+       7 -  const [cart, setCart] = useState({ items: [], itemCount: 0, s
+         -ubtotal: 0, tax: 0, total: 0 });                               
+       7 +  const [cart, setCart] = useState({                           
+       8 +    items: [], itemCount: 0, subtotal: 0, discount: 0, discount
+         +Code: null, tax: 0, total: 0,                                  
+       9 +  });                                                          
+      10    const [loading, setLoading] = useState(false);
+      11  
+      12    const fetchCart = useCallback(async () => {
+
+● Update(frontend/src/context/CartContext.jsx)
+  ⎿  Added 17 lines, removed 1 line
+      62      }
+      63    };
+      64  
+      65 +  // Errors (e.g. invalid code) propagate so the caller can sho
+         +w them inline.                                                 
+      66 +  const applyDiscount = async (code) => {                      
+      67 +    await api.applyDiscount(code);                             
+      68 +    await fetchCart();                                         
+      69 +  };                                                           
+      70 +                                                               
+      71 +  const removeDiscount = async () => {                         
+      72 +    await api.removeDiscount();                                
+      73 +    await fetchCart();                                         
+      74 +  };                                                           
+      75 +                                                               
+      76    return (
+      66 -    <CartContext.Provider value={{ cart, loading, addItem, upda
+         -teQuantity, removeItem, clearAll, fetchCart }}>                
+      77 +    <CartContext.Provider                                      
+      78 +      value={{                                                 
+      79 +        cart, loading, addItem, updateQuantity, removeItem, cle
+         +arAll,                                                         
+      80 +        applyDiscount, removeDiscount, fetchCart,              
+      81 +      }}                                                       
+      82 +    >                                                          
+      83        {children}
+      84      </CartContext.Provider>
+      85    );
+
+● Write(frontend/src/components/DiscountCodeForm.jsx)
+  ⎿  Wrote 54 lines to frontend/src/components/DiscountCodeForm.jsx
+       1 import { useState } from 'react';
+       2 import { useCart } from '../context/CartContext';
+       3 
+       4 function DiscountCodeForm() {
+       5   const { cart, applyDiscount, removeDiscount } = useCart();
+       6   const [code, setCode] = useState('');
+       7   const [error, setError] = useState('');
+       8   const [busy, setBusy] = useState(false);
+       9 
+      10   async function handleApply(e) {
+     … +46 lines (ctrl+o to expand)
+
+● Update(frontend/src/pages/CartPage.jsx)
+  ⎿  Added 7 lines
+      53            <span>Subtotal ({cart.itemCount} items)</span>
+      54            <span>${cart.subtotal.toFixed(2)}</span>
+      55          </div>
+      56 +        <DiscountCodeForm />                                   
+      57 +        {cart.discount > 0 && (                                
+      58 +          <div className="cart-summary-row discount">          
+      59 +            <span>Discount ({cart.discountCode})</span>        
+      60 +            <span>-${cart.discount.toFixed(2)}</span>          
+      61 +          </div>                                               
+      62 +        )}                                                     
+      63          <div className="cart-summary-row">
+      64            <span>Tax (8%)</span>
+      65            <span>${cart.tax.toFixed(2)}</span>
+
+● Update(frontend/src/pages/CartPage.jsx)  ⎿  Added 1 line
+      1  import { useState } from 'react';
+      2  import { useNavigate } from 'react-router-dom';
+      3  import CartItem from '../components/CartItem';
+      4 +import DiscountCodeForm from '../components/DiscountCodeForm';  
+      5  import { useCart } from '../context/CartContext';
+      6  import * as api from '../services/api';
+      7  
+
+● Update(frontend/src/pages/CartPage.jsx)
+  ⎿  Added 1 line, removed 1 line
+       6  import * as api from '../services/api';
+       7  
+       8  function CartPage() {
+       9 -  const { cart, clearAll } = useCart();                        
+       9 +  const { cart, clearAll, fetchCart } = useCart();             
+      10    const [address, setAddress] = useState('');
+      11    const [ordering, setOrdering] = useState(false);
+      12    const navigate = useNavigate();
+
+● Update(frontend/src/pages/CartPage.jsx)
+  ⎿  Added 1 line
+      20      setOrdering(true);
+      21      try {
+      22        await api.createOrder(address);
+      23 +      await fetchCart();                                       
+      24        alert('Order placed successfully!');
+      25        setAddress('');
+      26        navigate('/orders');
+
+● Update(frontend/src/pages/OrdersPage.jsx)
+  ⎿  Added 5 lines
+      56                  </div>
+      57                ))}
+      58              </div>
+      59 +            {order.discount > 0 && (                           
+      60 +              <div className="order-discount">                 
+      61 +                Discount ({order.discountCode}): -${order.disco
+         +unt.toFixed(2)}                                                
+      62 +              </div>                                           
+      63 +            )}                                                 
+      64              <div style={{ marginTop: '0.8rem', textAlign: 'righ
+          t', fontWeight: 'bold' }}>
+      65                Total: ${order.total.toFixed(2)}
+      66              </div>
+
+● Update(frontend/src/styles.css)
+  ⎿  Added 44 lines
+      140    font-weight: bold;
+      141  }
+      142  
+      143 +.cart-summary-row.discount,                                   
+      144 +.order-discount {                                             
+      145 +  color: #067d62;                                             
+      146 +}                                                             
+      147 +                                                              
+      148 +.order-discount {                                             
+      149 +  margin-top: 0.8rem;                                         
+      150 +  text-align: right;                                          
+      151 +}                                                             
+      152 +                                                              
+      153 +/* Discount code */                                           
+      154 +.discount-form,                                               
+      155 +.discount-applied {                                           
+      156 +  padding: 0.5rem 0;                                          
+      157 +}                                                             
+      158 +                                                              
+      159 +.discount-form-row,                                           
+      160 +.discount-applied {                                           
+      161 +  display: flex;                                              
+      162 +  gap: 0.5rem;                                                
+      163 +  align-items: center;                                        
+      164 +}                                                             
+      165 +                                                              
+      166 +.text-input {                                                 
+      167 +  flex: 1;                                                    
+      168 +  padding: 0.6rem;                                            
+      169 +  border-radius: 4px;                                         
+      170 +  border: 1px solid #ddd;                                     
+      171 +}                                                             
+      172 +                                                              
+      173 +.discount-chip {                                              
+      174 +  background: #e6f4ea;                                        
+      175 +  color: #067d62;                                             
+      176 +  border-radius: 999px;                                       
+      177 +  padding: 0.2rem 0.8rem;                                     
+      178 +  font-weight: bold;                                          
+      179 +}                                                             
+      180 +                                                              
+      181 +.discount-error {                                             
+      182 +  color: #b12704;                                             
+      183 +  font-size: 0.85rem;                                         
+      184 +  margin-top: 0.4rem;                                         
+      185 +}                                                             
+      186 +                                                              
+      187  /* Category filter */
+      188  .category-filter {
+      189    display: flex;
+
+● Frontend is done. Now the tests. I'll put pytest and moto in a separate
+  requirements-dev.txt so they stay out of the Lambda package. First I'll check
+  what's installed.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Nothing is installed. I'll create a throwaway virtualenv in /tmp so the repo
+  stays clean.
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+● The failures stem from an empty products table in the test setup, not the
+  feature itself. I'll seed products in the fixture and clean up the
+  fixed-discount cap test. · summary
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● All 20 tests pass. I'll clean up a leftover pointless add/remove in the cap
+  test, then smoke-test the HTTP routes (apply, bad code, checkout, reload) with
+  Flask's test client. · summary
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+● Everything checks out — cart clears, order retains discount info, frontend
+  builds, and the SAM template is valid. Now I'll update the README and
+  CLAUDE.md, which still incorrectly say there are no tests. · summary
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● I noticed CLAUDE.md still says "three DynamoDB tables" when there are now
+  four—fixing that and cleaning up leftover pycache directories. · summary
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● The discount code feature is built, and the backend tests, a Flask smoke test
+  and the frontend build all pass. I haven't run the UI in a browser, and
+  nothing is deployed or committed.
+
+  How it works
+
+  - Codes: a new DynamoDB table holds the codes. It seeds SAVE10 (10% off),
+    FIVEOFF ($5 off) and EXPIRED the first time a code is validated.
+  - Applying a code: POST /api/cart/discount takes {"code": "..."} and DELETE 
+    /api/cart/discount removes it. A bad, empty or expired code returns 400 with
+    an error message.
+  - Storage: a cart holds one code, saved as a hidden row in the cart table.
+  - Totals: tax is charged on the discounted subtotal, and the discount can't
+    exceed the subtotal.
+  - Re-checking: the code is re-checked every time the cart loads, so an expired
+    code stops applying on its own. Checkout saves discount and discountCode on
+    the order, and a successful order also clears the applied code.
+  - Shared totals code: both the cart and order code now use one helper,
+    services/pricing.py. This replaced two places that each had the 8% rate
+    hardcoded.
+  - Frontend:
+    - A new DiscountCodeForm component sits in the cart summary and shows errors
+      inline.
+    - There's a discount line in the cart summary.
+    - Past orders show the discount.
+    - I also added a cart refetch after checkout, so the cart doesn't keep
+      showing a stale code.
+    - The new component follows your React rules, with no inline styles.
+
+  Verification
+
+  - Tests: 20 backend tests pass. They use pytest and moto, with DynamoDB
+    mocked, and cover percent and fixed discounts, the cap, invalid and expired
+    codes, removal and orders. This also creates the backend/tests/ the README
+    mentioned.
+  - Smoke test: through Flask's test client, applying save10 to a $99.98 cart
+    gave a $97.18 total. The order kept the discount and the cart emptied.
+  - Build: npm run build succeeds and sam validate says the template is valid.
+
+  Things to know
+
+  - Deploying creates a new DynamoDB table, so run ./deploy.sh yourself when
+    you're ready.
+  - Test packages are in backend/requirements-dev.txt, so the Lambda bundle
+    stays small.
+  - README.md and CLAUDE.md now cover the new endpoints, files and test
+    commands.
+  - docs/discount-code-plan.md is still the original plan. Its "Applied code"
+    bullet is a rambling draft, and the sentinel row it recommends is what I
+    built.
+  - Existing components such as CartPage.jsx still break your no-inline-styles
+    rule. I didn't touch them.
+  - Your earlier /init rules file, .claude/rules/react-components.md, is in
+    place.
+
+✻ Brewed for 2m 59s · done 5:59 PM
+
+※ recap: Goal: add a discount code feature to the shopping cart. It's built and tested (20 backend tests pass, frontend builds, template validates), but nothing is deployed or committed. Next action: you decide whether to commit and run ./deploy.sh. (disable recaps in /config)
