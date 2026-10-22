@@ -1,0 +1,3201 @@
+ ▐▛███▛█   Claude Code v2.1.308
+▝▜██████▀  Sonnet 5.5 · Amazon Bedrock
+ ▝▝   ▝▝   /workshop/task-manager
+
+
+❯ I want to build a simple personal Task Manager REST API. The application      
+  should allow users to:                                                        
+  1. Create a new task with a title and optional description                    
+  2. List all tasks                                                             
+  3. Mark a task as complete                                                    
+  4. Delete a task                                                              
+                                                                                
+  Technology: Python with Flask. Storage: in-memory (no database required).     
+                                                                                
+  Do not write any code yet. Acknowledge the intent and confirm your            
+  understanding.                                                                
+
+● Understood. You want a simple personal Task Manager REST API built with Python
+  and Flask, using in-memory storage (no database). It should support four
+  operations:
+
+  1. Create a task with a required title and an optional description.
+  2. List all tasks.
+  3. Complete a task, by marking an existing task as done.
+  4. Delete a task.
+
+  My assumptions, which you can correct:
+  - Tasks get an auto-generated ID, a completed flag that defaults to false, and
+    probably a created timestamp.
+  - Endpoints would be JSON-based and RESTful: POST /tasks, GET /tasks, PATCH 
+    /tasks/<id>/complete (or PUT), and DELETE /tasks/<id>.
+  - Invalid input, such as a missing title, returns a 400. An unknown ID returns
+    a 404.
+  - Data resets when the server restarts, since storage is in-memory.
+  - The project goes in /workshop/task-manager. That directory is a git repo, so
+    I'd keep it separate from the untracked shopping-cart files.
+
+  Questions before I start:
+  - Should I include tests (e.g. pytest) and a requirements.txt/README, or keep
+    it to a single app.py?
+  - Do you prefer PATCH or PUT for marking a task complete?
+
+  Tell me when to start, and answer those two questions if you have a
+  preference. Otherwise I'll default to a small app with pytest tests and PATCH.
+
+✻ Cooked for 4s · done 4:52 PM
+
+❯ Create well-defined user stories for this Task Manager based on the           
+  requirements above.                                                           
+                                                                                
+  For each user story include:                                                  
+  - Title                                                                       
+  - As a / I want to / So that                                                  
+  - Acceptance criteria                                                         
+                                                                                
+  Save the user stories to docs/user-stories.md                                 
+
+● Write(docs/user-stories.md)
+  ⎿  Wrote 123 lines to docs/user-stories.md
+       1 # Task Manager – User Stories
+       3 Personal Task Manager REST API built with Python and Flask, usin
+         g in-memory storage (data resets on server restart). All request
+       4 
+       6 
+       7 | Field         | Type    | Notes                               
+       8 |---------------|---------|-------------------------------------
+         ---|
+            |
+            |
+     … +143 lines (ctrl+o to expand)
+
+● I saved the user stories to docs/user-stories.md. I haven't written any
+  application code. Each story has a title, an As a / I want to / So that
+  statement, and acceptance criteria.
+
+  - US-1, Create a task: POST /tasks returns 201. It validates the title (400 if
+    missing, empty or not a string) and treats the description as optional.
+  - US-2, List all tasks: GET /tasks returns tasks in creation order, or [] if
+    there are none.
+  - US-3, Mark a task complete: PATCH /tasks/<id>/complete is idempotent and
+    returns 404 for an unknown ID.
+  - US-4, Delete a task: DELETE /tasks/<id> returns 204, or 404 if the task is
+    missing or already deleted.
+  - US-5, Consistent API behaviour: all responses are JSON, errors share the
+    shape {"error": "..."}, and status codes are used consistently.
+  - US-6, In-memory storage: the app needs no database, restarting clears the
+    data, and storage sits behind a small layer so it can be swapped later.
+
+  The document also defines the task model (id, title, description, completed,
+  created_at) and lists what is out of scope: auth, persistence, editing a task,
+  un-completing a task, and filtering.
+
+  US-5 and US-6 go beyond your four requirements. They cover error handling and
+  storage, and you can drop them if you want only the four core stories.
+
+  For a non-integer ID, US-3 allows either 404 or 400 as long as every endpoint
+  does the same. You'll need to pick one before implementation.
+
+✻ Cogitated for 16s · done 4:53 PM
+
+※ recap: We're planning a Flask Task Manager REST API with in-memory storage, and I've just saved the user stories to docs/user-stories.md without writing any code. Next, you decide whether a non-integer ID should return 404 or 400, and whether to start implementation. (disable recaps in /config)
+
+❯ Based on the user stories in docs/user-stories.md, design the component       
+  architecture for this Task Manager API.                                       
+                                                                                
+  Include:                                                                      
+  - Component diagram (describe in text)                                        
+  - Data model (Task attributes and their types)                                
+  - API endpoint definitions (method, path, request/response)                   
+  - How components interact                                                     
+                                                                                
+  Save the design to docs/architecture.md                                       
+
+● Updated plan
+  ⎿  /plan to preview
+
+● User approved Claude's plan
+  ⎿  Plan saved to: ~/.claude/plans/based-on-the-user-elegant-book.md · /plan to
+     edit
+     Plan: Architecture design for Task Manager API
+
+     Context
+
+     The user stories in docs/user-stories.md are done. The next step is a
+     design doc, docs/architecture.md, covering the component diagram, data
+     model, endpoint definitions and component interactions. No application code
+     exists yet, so there are no existing utilities to reuse. This is a
+     docs-only change, and the exploration and design agents are skipped because
+     the scope is a single new file.
+
+     Deliverable
+
+     Create one file: /workshop/task-manager/docs/architecture.md. It will
+     contain these sections:
+
+     1. Overview: Flask app, in-memory storage, JSON only. It is traceable to
+        US-1 through US-6.
+     2. Component diagram (ASCII, plus a text description):
+        Client -> Flask app (app factory) -> Routes (Blueprint tasks) -> 
+        TaskService (validation and business rules) -> TaskRepository (in-memory
+        dict, lock, ID counter). Error handlers are cross-cutting and sit at
+        the app level.
+     3. Component responsibilities:
+        - app.py / create_app(): builds the app, registers the blueprint and the
+          error handlers.
+        - routes/tasks.py: HTTP concerns only (parse JSON, call the service, map
+          to status codes).
+        - services/task_service.py: validates title and description, sets
+          defaults, raises ValidationError and TaskNotFoundError.
+        - repositories/task_repository.py: an in-memory store behind a small
+          interface (add, list, get, update, delete), so a DB can replace it
+          later (US-6).
+        - models/task.py: Task dataclass with to_dict().
+        - errors.py: exception classes and handlers that produce {"error": 
+          "..."} (US-5).
+     4. Data model: id int (auto-increment, never reused), title str (required,
+        non-empty after trim), description str (default ""), completed bool
+        (default false), created_at str (ISO 8601 UTC). Storage is a dict {id: 
+        Task} that preserves insertion order, plus a next_id counter guarded by
+        a threading.Lock.
+     5. API endpoints (method, path, request, success response, errors):
+        - POST /tasks: body {title, description?}. Returns 201 with the task.
+          Returns 400 for invalid or missing JSON and for a bad title or
+          description.
+        - GET /tasks: returns 200 with an array in creation order, or [].
+        - PATCH /tasks/<int:id>/complete: no body. Returns 200 with the updated
+          task, and is idempotent. Returns 404 if the task is missing.
+        - DELETE /tasks/<int:id>: returns 204 with no body. Returns 404 if the
+          task is missing or already deleted.
+        - A non-integer id gives 404 through Flask's <int:id> converter. This
+          resolves the open question left in US-3, so I'd update US-3 to match.
+        - Unsupported methods return 405 as JSON. Unexpected errors return 500
+          as JSON with no stack trace.
+     6. Interaction flows: sequence descriptions for create, list, complete,
+        delete and the error path.
+     7. Error handling table, project layout, testing approach and design 
+        decisions: pytest with Flask's test client, and a fresh app and
+        repository per test via the factory. The decisions cover why a layered
+        structure, why PATCH, and the single-process, non-persistent
+        limitations.
+
+     Verification
+
+     - Check that every endpoint and acceptance criterion in
+       docs/user-stories.md maps to a section of the architecture doc.
+     - Check that the status codes, field names and error shape are consistent
+       across sections.
+     - No code is run, because this is a docs-only change.
+
+● Write(docs/architecture.md)
+  ⎿  Wrote 232 lines to docs/architecture.md
+       1 # Task Manager – Architecture
+       2 
+       3 Design for the personal Task Manager REST API described in `docs
+         n-memory storage.
+       4 
+       5 ## 1. Component diagram
+       6 
+       8                 +---------------------------+
+       9                 |          Client           |
+      10                 |  (curl, browser, tests)   |
+     … +293 lines (ctrl+o to expand)
+
+● I saved the design to docs/architecture.md. I haven't written any application
+  code, and I haven't run anything.
+
+  The doc has these parts:
+
+  - Component diagram: an ASCII diagram of Client → Flask app → Routes
+    (Blueprint) → TaskService → InMemoryTaskRepository → Task model. Error
+    handling in errors.py applies across all layers. Each layer depends only on
+    the one below it.
+  - Component table and project layout: one file per component, each with a
+    single responsibility. The layout includes tests/ grouped by user story.
+  - Data model:
+    - id is an integer.
+    - title is a required string.
+    - description is a string that defaults to "".
+    - completed is a boolean that defaults to false.
+    - created_at is an ISO 8601 UTC string.
+    - Storage is a dict plus an ID counter and a lock.
+  - API endpoints: POST /tasks, GET /tasks, PATCH /tasks/{id}/complete and
+    DELETE /tasks/{id}. Each has its request, response, status codes and errors.
+    The doc also has a table of status codes and the shared {"error": "..."}
+    shape.
+  - Interactions: step-by-step flows for create, list, complete, delete and the
+    error path.
+  - Testing approach and design decisions: pytest with a fresh app per test,
+    plus a table of the choices made and the known limitations.
+
+  The doc settles the open question from US-3. A non-integer ID such as
+  /tasks/abc returns 404 through the <int:id> route converter.
+  docs/user-stories.md still says either 404 or 400 is acceptable, so I can
+  update US-3 to match.
+
+✻ Churned for 43s · done 4:58 PM
+
+❯ Create a CLAUDE.md file for this project with the following:                  
+  - Project description (Task Manager REST API)                                 
+  - Tech stack (Python, Flask)                                                  
+  - Build commands: pip install -r requirements.txt                             
+  - Test command: pytest tests/ -v                                              
+  - Code style: use docstrings, type hints, proper HTTP status codes            
+  - Convention: all API responses use JSON format with consistent error         
+  structure                                                                     
+
+● Write(CLAUDE.md)
+  ⎿  Wrote 29 lines to CLAUDE.md
+       1 # Task Manager
+       3 A simple personal Task Manager REST API. Users can create a task
+          (title plus optional description), list all tasks, mark a task 
+         complete, and delete a task. Storage is in-memory, so data reset
+       4 
+       5 See `docs/user-stories.md` for requirements and `docs/architectu
+       6 
+       7 ## Tech stack
+       8 
+      10 - Flask
+     … +25 lines (ctrl+o to expand)
+
+● I created /workshop/task-manager/CLAUDE.md with the sections you listed:
+
+  - Description: the Task Manager REST API, with pointers to
+    docs/user-stories.md and docs/architecture.md.
+  - Tech stack: Python and Flask. I also listed pytest and in-memory storage,
+    since the design uses both.
+  - Commands: pip install -r requirements.txt and pytest tests/ -v.
+  - Code style: docstrings, type hints, and proper HTTP status codes. I listed
+    the specific codes from the architecture doc.
+  - Conventions: JSON responses with the consistent {"error": "<message>"}
+    structure.
+
+  I added one line you didn't ask for. It says to keep routes, service and
+  repository separate, matching the architecture doc. You can delete it if you'd
+  rather not have it.
+
+  requirements.txt doesn't exist yet, so the install command won't work until
+  the implementation creates it.
+
+✻ Sautéed for 5s · done 4:59 PM
+
+❯ Create a skill at .claude/skills/run-tests/SKILL.md with the following        
+  content:                                                                      
+                                                                                
+  ---                                                                           
+  name: run-tests                                                               
+  description: Run the test suite and report results                            
+  disable-model-invocation: true                                                
+  ---                                                                           
+                                                                                
+  Run the test suite for the Task Manager:                                      
+  1. Install dependencies: pip install -r requirements.txt                      
+  2. Run tests: pytest tests/ -v                                                
+  3. Report pass/fail count                                                     
+  4. If any tests fail, analyze the failure and suggest a fix                   
+
+● Write(.claude/skills/run-tests/SKILL.md)
+  ⎿  Wrote 11 lines to .claude/skills/run-tests/SKILL.md
+       1 ---
+       2 name: run-tests
+       3 description: Run the test suite and report results
+       4 disable-model-invocation: true
+       5 ---
+       6 
+       7 Run the test suite for the Task Manager:
+       8 1. Install dependencies: pip install -r requirements.txt
+       9 2. Run tests: pytest tests/ -v
+      10 3. Report pass/fail count
+     … +1 line (ctrl+o to expand)
+
+● I created the skill at
+  /workshop/task-manager/.claude/skills/run-tests/SKILL.md with exactly the
+  content you gave.
+
+  Because disable-model-invocation: true is set, I won't run it on my own. You
+  trigger it by typing /run-tests.
+
+  The skill won't work yet. requirements.txt and tests/ don't exist, so the
+  install and pytest steps would fail until the implementation is built.
+
+✻ Churned for 4s · done 5:00 PM
+
+❯ /reload-skills                                                                
+  ⎿  Reloaded skills: 13 skills available (none added or removed).
+
+❯ /skills 
+  ⎿  No changes
+
+❯ Based on the architecture in docs/architecture.md, implement the Task Manager 
+  API.                                                                          
+                                                                                
+  Requirements:                                                                 
+  - Follow the design exactly                                                   
+  - Create a clean project structure                                            
+  - Include a requirements.txt with dependencies                                
+  - Add docstrings to all functions                                             
+  - Use proper HTTP status codes                                                
+  - Include input validation                                                    
+                                                                                
+  Create the implementation in the following structure:                         
+  - app.py (Flask application with routes)                                      
+  - models.py (Task data model)                                                 
+  - requirements.txt (dependencies)                                             
+
+● Write(models.py)
+  ⎿  Wrote 91 lines to models.py
+      1 """Data model, domain errors and in-memory storage for the Task M
+        anager."""
+      2 
+      3 from __future__ import annotations
+      4 
+      5 import threading
+      6 from dataclasses import dataclass, field
+      7 from datetime import datetime, timezone
+      8 from typing import Any
+      9 
+     … +90 lines (ctrl+o to expand)
+
+● Write(app.py)
+  ⎿  Wrote 145 lines to app.py
+       1 """Flask application for the Task Manager REST API.
+       2 
+       3 Layers (see docs/architecture.md): routes handle HTTP only, Task
+       4 validation and business rules, and the repository in models.py h
+         andles storage.
+       5 """
+       6 
+       8 
+       9 import logging
+      10 from typing import Any
+     … +159 lines (ctrl+o to expand)
+● Write(requirements.txt)
+  ⎿  Wrote 2 lines to requirements.txt
+      1 flask>=3.0
+      2 pytest>=8.0
+
+● Now a quick smoke test with Flask's test client, run from a separate
+  directory.
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+● I implemented the API in app.py, models.py and requirements.txt. I ran it with
+  Flask's test client, and every case I tried returned the status I expected.
+
+  What I built
+  - models.py:
+    - the Task dataclass with to_dict()
+    - ValidationError and TaskNotFoundError
+    - InMemoryTaskRepository, a thread-safe store with a lock and an ID counter
+      that never reuses IDs
+  - app.py:
+    - TaskService, which holds the validation and business rules
+    - the four routes: POST /tasks, GET /tasks, PATCH /tasks/<int:id>/complete
+      and DELETE /tasks/<int:id>
+    - error handlers that return {"error": "..."} for 400, 404, 405 and 500
+    - a create_app() factory
+  - requirements.txt: flask>=3.0 and pytest>=8.0.
+
+  Every function has a docstring and type hints.
+
+  Deviation from the architecture: you asked for three files, but
+  docs/architecture.md describes separate routes/, services/, repositories/ and
+  errors.py modules. I kept the same layers and class names and fitted them into
+  your three files:
+  - The repository, model and exceptions are in models.py.
+  - The service, routes and error handlers are in app.py.
+
+  If you'd rather have the full folder layout, splitting it is a mechanical
+  change.
+
+  What I checked
+  - I ran a script (/tmp/smoke.py) against the Flask test client. It lives
+    outside the repo, and I installed dependencies in a temporary venv at
+    /tmp/tm-venv.
+  - The script covered create, list, complete (including a repeat call), delete
+    (including a repeat call) and an unknown ID.
+  - It also covered a blank or non-string title, a non-string description, a
+    body that isn't a JSON object, a non-integer ID, a wrong method and an
+    unknown route.
+  - I did not run the server for real, and there is no tests/ directory yet.
+    /run-tests and pytest tests/ -v will find nothing until tests are added.
+
+  I can write the pytest suite next, with one test per acceptance criterion in
+  docs/user-stories.md.
+
+✻ Brewed for 46s · done 5:03 PM
+
+❯ Install the dependencies and verify the application starts without errors:    
+                                                                                
+  pip install -r requirements.txt                                               
+  python app.py &                                                               
+                                                                                
+  Then test each endpoint with curl:                                            
+  - Create a task                                                               
+  - List all tasks                                                              
+  - Mark a task complete                                                        
+  - Delete a task                                                               
+                                                                                
+  Show me the curl commands and their responses. Kill the server when done.     
+
+  Ran 3 shell commands (ctrl+o to expand)
+
+● The app started with no errors, and all four endpoints behaved as designed. I
+  stopped the server afterwards: the kill -0 check reported "No such process",
+  so it is no longer running.
+
+  Setup
+  - The system Python blocks pip install (PEP 668), so I used a virtual
+    environment outside the repo at /tmp/tm-venv. Its pip had already installed
+    everything in requirements.txt during the earlier smoke test.
+  - I started the server with python app.py &. It logged Running on 
+    http://127.0.0.1:5000, with no errors. The only warning was Flask's usual
+    "development server" notice.
+
+  Curl commands and responses
+
+  Step: Create
+  Command: curl -X POST /tasks -H 'Content-Type: application/json' -d 
+  '{"title":"Buy milk","description":"2 litres"}'
+  Response: 201
+  {"completed":false,"created_at":"2026-10-22T17:04:17.409016+00:00","descriptio
+  n":"2
+    litres","id":1,"title":"Buy milk"}
+  ────────────────────────────────────────
+  Step: List
+  Command: curl /tasks
+  Response: 200 [{...task 1, "completed":false...}]
+  ────────────────────────────────────────
+  Step: Complete
+  Command: curl -X PATCH /tasks/1/complete
+  Response: 200 the same task with "completed":true
+  ────────────────────────────────────────
+  Step: List again
+  Command: curl /tasks
+  Response: 200 task 1 now shows "completed":true
+  ────────────────────────────────────────
+  Step: Delete
+  Command: curl -X DELETE /tasks/1
+  Response: 204, empty body
+  ────────────────────────────────────────
+  Step: List after delete
+  Command: curl /tasks
+  Response: 200 []
+
+  Each command used http://127.0.0.1:5000 as the base URL.
+
+  I also checked two error cases:
+  - Deleting task 1 a second time returned 404 {"error":"task 1 not found"}.
+  - Creating a task with no title returned 400 {"error":"title is required and 
+    must be a non-empty string"}.
+
+  The server's own request log shows the same sequence of status codes: 201,
+  200, 200, 200, 204, 200, 404, 400.
+
+✻ Sautéed for 16s · done 5:04 PM
+
+❯ Write comprehensive tests for the Task Manager API.                           
+                                                                                
+  Requirements:                                                                 
+  - Use pytest as the test framework                                            
+  - Test all CRUD operations (create, read, update, delete)                     
+  - Test edge cases: empty title, non-existent task ID, duplicate operations    
+  - Test proper HTTP status codes for success and error cases                   
+  - Add pytest to requirements.txt                                              
+                                                                                
+  Save tests to tests/test_app.py. Run the tests and fix any failures.          
+
+● Write(pytest.ini)
+  ⎿  Wrote 3 lines to pytest.ini
+      1 [pytest]
+      2 pythonpath = .
+      3 testpaths = tests
+
+● Write(tests/test_app.py)
+  ⎿  Wrote 406 lines to tests/test_app.py
+       1 """Tests for the Task Manager API, grouped by user story (docs/u
+         ser-stories.md)."""
+       2 
+       3 from __future__ import annotations
+       4 
+       6 from typing import Any
+       7 
+       8 import pytest
+       9 from flask import Flask
+      10 from flask.testing import FlaskClient
+     … +467 lines (ctrl+o to expand)
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● I wrote the tests in tests/test_app.py, and all 61 pass in 0.49s. None failed
+  on the first run, so I had nothing to fix.
+
+  Coverage
+
+  Area: Create (POST /tasks)
+  What the tests check: A valid task returns 201. The description defaults to ""
+
+  (also when null). The title is trimmed, created_at is ISO 8601, and IDs
+  increase and are never reused.
+  ────────────────────────────────────────
+  Area: Create, bad input
+  What the tests check: An empty, blank or missing title returns 400. A
+  non-string title or description returns 400. A missing body, malformed JSON
+  or a non-object body returns 400. A rejected create stores nothing and
+  doesn't consume an ID.
+  ────────────────────────────────────────
+  Area: Read (GET /tasks)
+  What the tests check: An empty store returns []. Tasks come back in creation
+  order, completed and open tasks both appear, deleted tasks don't, and every
+  field is present.
+  ────────────────────────────────────────
+  Area: Update (PATCH /tasks/<id>/complete)
+  What the tests check: The task is marked complete and the change persists.
+  Repeating the call is idempotent. Only the target task changes. An unknown or
+   deleted ID returns 404, and so does a non-integer ID.
+  ────────────────────────────────────────
+  Area: Delete (DELETE /tasks/<id>)
+  What the tests check: Returns 204 with an empty body. The task is gone
+  afterwards and other tasks are untouched. Deleting twice or an unknown ID
+  returns 404.
+  ────────────────────────────────────────
+  Area: Errors and storage
+  What the tests check: Unknown routes (404) and wrong methods (405) return the
+  JSON error shape. Every 400 and 404 uses {"error": ...}. A forced exception
+  gives a generic 500 with no internal detail. A fresh app starts empty.
+  ────────────────────────────────────────
+  Area: Service and repository
+  What the tests check: Unit tests with no HTTP, covering the domain exceptions
+  and repository operations.
+
+  Other changes
+  - pytest>=8.0 was already in requirements.txt from the implementation step, so
+    I didn't change it.
+  - I added pytest.ini with pythonpath = . and testpaths = tests. Without it,
+    tests/test_app.py can't import app and models from the project root.
+
+  "Update" in the CRUD list means completing a task, because the design has no
+  endpoint for editing a task's title or description. The tests cover it that
+  way.
+
+  The .pytest_cache and __pycache__ folders now exist in the project, and the
+  repo has no .gitignore for them. I haven't added one.
+
+✻ Crunched for 40s · done 5:05 PM
+
+❯ /run-tests                                                                    
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● All 61 tests passed and none failed, so there's nothing to fix.
+
+  I ran the steps in the temporary venv at /tmp/tm-venv, because the system
+  Python blocks pip install. The dependencies were already installed, so the
+  install step changed nothing. The suite finished in 0.42s.
+
+✻ Crunched for 4s · done 5:07 PM
+
+❯ Use a subagent to review the Task Manager implementation. Check for:          
+  - Missing input validation                                                    
+  - Edge cases not covered by tests                                             
+  - Security issues (injection, improper error exposure)                        
+  - Inconsistencies between the architecture doc and the implementation         
+                                                                                
+  Report gaps only — not style preferences.                                     
+
+● Agent(Review Task Manager implementation)
+  ⎿  Backgrounded agent (↓ to manage · ctrl+o to expand)
+
+● I've started a review subagent. It will check the four areas you listed:
+  missing validation, test gaps, security, and doc-versus-code mismatches. It is
+  read-only apart from scratch scripts under /tmp. I'll report its findings
+  when it finishes.
+
+✻ Brewed for 7s · done 5:07 PM
+
+● Agent "Review Task Manager implementation" finished · 45s
+
+● The reviewer found real gaps, mostly in validation limits and concurrency. I
+  haven't re-run its reproductions myself. Its models.py line numbers (such as
+  227) are also wrong, because that file is only about 90 lines long. Everything
+  below is its report, and I changed no code.
+
+  Code gaps
+
+  #: 1
+  Severity: Medium
+  Gap: complete_task does get(), then changes the task, then update(), and each
+  call takes the lock separately. A DELETE that lands in between is undone, so
+  the task comes back. update() also doesn't check that the task exists.
+  ────────────────────────────────────────
+  #: 2
+  Severity: Medium
+  Gap: The repository returns its live Task objects, so callers can change
+  stored
+  state without calling update(). to_dict() also runs after the lock is
+  released.
+  ────────────────────────────────────────
+  #: 3
+  Severity: Medium
+  Gap: There are no size limits. A 5 MB title was accepted with a 201, stored,
+  and echoed back. MAX_CONTENT_LENGTH is unset, and there is no cap on the
+  number of tasks, so memory can grow without bound.
+  ────────────────────────────────────────
+  #: 4
+  Severity: Low-medium
+  Gap: A deeply nested JSON body raises RecursionError. That gives a logged 500
+  instead of a 400.
+  ────────────────────────────────────────
+  #: 5
+  Severity: Low
+  Gap: Control characters, NUL and a lone surrogate are accepted in titles. A
+  title of only \u200b (a zero-width space) passes the "non-empty" check.
+  ────────────────────────────────────────
+  #: 6
+  Severity: Low
+  Gap: The Content-Type header is ignored. text/plain with valid JSON gets a
+  misleading 400 where 415 would fit, and a body declared as UTF-16 but sent as
+   UTF-8 is accepted.
+  ────────────────────────────────────────
+  #: 7
+  Severity: Low
+  Gap: The handler returns Werkzeug's HTML-flavoured wording, such as "If you
+  entered the URL manually…". The 404 message also echoes back the ID from the
+  URL.
+  ────────────────────────────────────────
+  #: 8
+  Severity: Low
+  Gap: OPTIONS /tasks returns 200 as text/html, which conflicts with US-5.
+  ────────────────────────────────────────
+  #: 9
+  Severity: Low
+  Gap: Extra fields such as id and completed are ignored. That's safe but
+  undocumented.
+
+  The reviewer found no problems with debug mode (debug=False), injection,
+  stack-trace exposure, or non-string and boolean inputs.
+
+  Missing tests
+
+  The tests that would currently fail:
+  - Complete after a concurrent delete.
+  - Mutating a returned Task.
+  - Oversized input.
+  - Deeply nested JSON.
+  - Control-character or zero-width titles.
+
+  Other missing tests:
+  - 100 parallel creates, to check the lock.
+  - A wrong content type.
+  - Extra fields.
+  - A huge ID.
+  - A negative ID or trailing slash.
+  - OPTIONS/HEAD.
+  - Whitespace in the description.
+  - The 500 handler logging the error.
+
+  Doc and implementation mismatches
+
+  - Stale layout: docs/architecture.md still shows routes/, services/,
+    repositories/, errors.py and the per-story test files. None of them exist,
+    because of the three-file layout you asked for. This is the most misleading
+    item.
+  - Thread-safety claim: the doc says the repository owns thread safety. That's
+    only true for add, given findings 1 and 2.
+  - Smaller items:
+    - The doc says an empty body means None, but the code rejects any
+      non-object.
+    - The doc's example error message differs from the real one.
+    - The doc doesn't mention the missing size limits.
+    - user-stories.md still says US-3 may return 400 or 404, though the code
+      returns 404.
+    - CLAUDE.md leaves out 500 from its status-code list.
+
+  Suggested next step
+
+  I'd fix 1 to 5 in code, add the failing tests, and bring architecture.md and
+  US-3 in line with what was built. For 3, I'd need limits from you: 200
+  characters for a title and 2,000 for a description, plus a 16 KB body cap,
+  would be my defaults. Should I go ahead?
+
+✻ Churned for 1m 2s · done 5:08 PM
+
+❯ Create deployment artifacts for the Task Manager API to run on AWS.           
+                                                                                
+  Create:                                                                       
+  1. A Dockerfile that packages the application                                 
+  2. A docker-compose.yml for local testing                                     
+  3. A docs/deployment-guide.md that explains:                                  
+     - How to build the Docker image                                            
+     - How to run locally with docker-compose                                   
+     - How to deploy to AWS — before writing this section, use the              
+  aws-knowledge MCP server to look up current guidance on ECS Fargate vs        
+  Lambda, choose one for this app, and cite the docs you used                   
+     - Environment variables needed                                             
+                                                                                
+  Write the Dockerfile but don't build or run it — Docker isn't installed in    
+  this environment. Instead, verify the Dockerfile is correct by reviewing each 
+  instruction.                                                                  
+
+● Going with ECS Fargate since Lambda's stateless model doesn't fit an in-memory
+  store. I'll write the artifacts now, adding gunicorn to requirements.txt
+  since the app currently binds to 127.0.0.1 via Flask's dev server, which won't
+  be reachable in a container. · summary
+
+● Write(requirements.txt)  ⎿  Added 1 line
+      1  flask>=3.0
+      2 +gunicorn>=22.0                                                  
+      3  pytest>=8.0
+
+● Write(Dockerfile)
+  ⎿  Wrote 28 lines to Dockerfile
+       1 FROM python:3.12-slim
+       2 
+       3 ENV PYTHONDONTWRITEBYTECODE=1 \
+       4     PYTHONUNBUFFERED=1 \
+       5     PORT=8000 \
+       7 
+       8 WORKDIR /app
+       9 
+      10 # Install dependencies first so this layer is cached until requi
+         rements.txt changes.
+     … +25 lines (ctrl+o to expand)
+
+● Write(.dockerignore)
+  ⎿  Wrote 12 lines to .dockerignore
+       1 .git
+       2 .claude
+       3 .pytest_cache
+       4 __pycache__
+       5 *.pyc
+       6 .venv
+       7 venv
+       8 tests
+       9 docs
+      10 *.md
+     … +2 lines (ctrl+o to expand)
+
+● Write(docker-compose.yml)
+  ⎿  Wrote 10 lines to docker-compose.yml
+       1 services:
+       2   api:
+       3     build: .
+       4     image: task-manager:latest
+       5     ports:
+       6       - "8000:8000"
+       7     environment:
+       8       PORT: "8000"
+       9       GUNICORN_THREADS: "4"
+      10     restart: unless-stopped
+
+● I won't run Docker. I can check the parts that don't need it: the exact CMD
+  and HEALTHCHECK commands run natively against only the files the image copies,
+  and I can parse the YAML.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● The log shows gunicorn 26 opening a control socket under ~/.gunicorn/. In the
+  image, appuser has no home directory, so that could fail. I'll check the
+  available options.
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● The flag exists in the version I tested, so I'll disable the socket and raise
+  the minimum gunicorn version to match.
+
+● Update(Dockerfile)
+  ⎿  Added 1 line, removed 1 line
+      25  
+      26  # Exactly one worker process: tasks live in that process's memo
+          ry, so a second
+      27  # worker would have its own separate, inconsistent copy. Concur
+          rency comes from threads.
+      28 -CMD ["sh", "-c", "exec gunicorn --bind 0.0.0.0:${PORT} --worker
+         -s 1 --threads ${GUNICORN_THREADS} --access-logfile - 'app:creat
+         -e_app()'"]                                                     
+      28 +CMD ["sh", "-c", "exec gunicorn --bind 0.0.0.0:${PORT} --worker
+         +s 1 --threads ${GUNICORN_THREADS} --no-control-socket --access-
+         +logfile - 'app:create_app()'"]                                 
+
+● Update(requirements.txt)
+  ⎿  Added 1 line, removed 1 line
+      1  flask>=3.0
+      2 -gunicorn>=22.0                                                  
+      2 +gunicorn>=26.0                                                  
+      3  pytest>=8.0
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+● Gunicorn runs cleanly with no home directory, there are no control-socket
+  lines in the log, and the process is stopped. Next I'll write the guide.
+
+● Write(docs/deployment-guide.md)
+  ⎿  Wrote 211 lines to docs/deployment-guide.md
+      1 # Task Manager – Deployment Guide
+      2 
+      3 This guide covers building the Docker image, running it locally w
+        AWS Fargate**.
+      4 
+      5 Files involved: `Dockerfile`, `docker-compose.yml`, `.dockerignor
+        e`, `requirements.txt`.
+      7 ## 1. Build the Docker image
+      8 
+      9 From the project root:
+     … +300 lines (ctrl+o to expand)
+
+● I wrote the Dockerfile, docker-compose.yml and docs/deployment-guide.md, but I
+  could not build or run any of it. Docker isn't installed here, so I checked
+  the Dockerfile by reading each instruction and by running its start and
+  health-check commands directly.
+
+  AWS choice: ECS Fargate, not Lambda. The aws-knowledge docs say Lambda
+  functions should be stateless and shouldn't rely on in-memory state. Lambda
+  environments can be removed at any time, and each one handles one request at a
+  time. With an in-memory store, tasks would vanish or look different from one
+  request to the next. Fargate runs one long-lived container, so the store works
+  as designed. The guide cites seven AWS pages.
+
+  Dockerfile review
+
+  ┌─────────────────────────────┬───────────────────────────────────────────┐
+  │         Instruction         │                  Verdict                  │
+  ├─────────────────────────────┼───────────────────────────────────────────┤
+  │ FROM python:3.12-slim       │ Matches the Python version I tested with. │
+  ├─────────────────────────────┼───────────────────────────────────────────┤
+  │ ENV PYTHONUNBUFFERED=1      │ Correct. Logs go straight to stdout, and  │
+  │ PORT=8000                   │ the defaults are overridable.             │
+  │ GUNICORN_THREADS=4          │                                           │
+  ├─────────────────────────────┼───────────────────────────────────────────┤
+  │ COPY requirements.txt then  │ Correct order for layer caching.          │
+  │ pip install --no-cache-dir  │                                           │
+  ├─────────────────────────────┼───────────────────────────────────────────┤
+  │ COPY app.py models.py ./    │ Correct today. It must be updated if you  │
+  │                             │ add modules.                              │
+  ├─────────────────────────────┼───────────────────────────────────────────┤
+  │ useradd --system            │                                           │
+  │ --no-create-home and USER   │ Correct, and runs unprivileged.           │
+  │ appuser                     │                                           │
+  ├─────────────────────────────┼───────────────────────────────────────────┤
+  │ EXPOSE 8000                 │ Documentation only. It matches the        │
+  │                             │ default PORT.                             │
+  ├─────────────────────────────┼───────────────────────────────────────────┤
+  │ HEALTHCHECK (exec form,     │ I ran this command and it exited 0.       │
+  │ urllib on /tasks)           │                                           │
+  ├─────────────────────────────┼───────────────────────────────────────────┤
+  │                             │ I ran this exact command natively. It     │
+  │ CMD sh -c "exec gunicorn    │ served requests with one worker. exec     │
+  │ ..."                        │ makes gunicorn PID 1, so it receives      │
+  │                             │ SIGTERM.                                  │
+  └─────────────────────────────┴───────────────────────────────────────────┘
+
+  Fixes I made while reviewing
+  - Binding and server: python app.py binds to 127.0.0.1, which can't be reached
+    from outside a container. I used gunicorn on 0.0.0.0 and added
+    gunicorn>=26.0 to requirements.txt. That file also still lists pytest, so
+    the image carries it unused.
+  - Workers: the Dockerfile fixes --workers 1, because a second worker would
+    have its own separate task list.
+  - Control socket: gunicorn 26 opens a control socket under ~/.gunicorn/, and
+    appuser has no home directory. I added --no-control-socket and re-ran it
+    with HOME unset. It started cleanly.
+  - .dockerignore: I added one, which you didn't ask for. It keeps tests, docs
+    and .git out of the build context.
+
+  What's in the guide
+  - How to build the image and how to run it with docker-compose.
+  - The environment variables. The app reads none itself, so the table covers
+    PORT and GUNICORN_THREADS, which only the start command uses.
+  - The AWS steps (ECR, cluster, task definition, ALB, service), with a section
+    on what was and wasn't verified.
+
+  Things to know before deploying
+  - Run exactly one task. The service uses
+    minimumHealthyPercent=0,maximumPercent=100, so deployments stop the old task
+    first. That avoids two tasks serving separate data, and the cost is a short
+    outage on each deploy.
+  - Data is lost on every restart or redeploy.
+  - The API has no authentication and no size limits (see the review findings).
+    The guide warns against exposing it publicly.
+  - I haven't run any of the AWS commands against an account, so try them in a
+    test account first.
+
+✻ Sautéed for 1m 40s · done 5:12 PM
+
+❯ Create a professional README.md for this project that includes:               
+  - Project description                                                         
+  - Features                                                                    
+  - API documentation (all endpoints with examples)                             
+  - How to run locally                                                          
+  - How to run tests                                                            
+  - How to deploy                                                               
+  - Project structure                                                           
+                                                                                
+  Also initialize a git repo and create an initial commit with all files.       
+
+  Listed 1 directory, ran 1 shell command (ctrl+o to expand)
+
+● Write(README.md)
+  ⎿  Wrote 190 lines to README.md
+       1 # Task Manager API
+       2 
+         ask. Create tasks, list them, mark them complete and delete them
+         . Storage is in-memory, so there is no database to set up, and a
+         ll data is lost when the server restarts.
+       5 ## Features
+       6 
+       7 - Create a task with a title and an optional description
+       9 - Mark a task as complete (repeatable without error)
+      10 - Delete a task
+     … +217 lines (ctrl+o to expand)
+
+● Write(.gitignore)
+  ⎿  Wrote 5 lines to .gitignore
+      1 __pycache__/
+      2 *.pyc
+      3 .pytest_cache/
+      4 .venv/
+      5 venv/
+
+● The README is written, with a .gitignore for the cache files. The git step
+  needs a decision from you first.
+
+● User answered Claude's questions:
+  ⎿  · task-manager is already inside an existing git repo whose root is 
+     /workshop (it also holds shopping-cart and has one commit, db3b27e). How 
+     should I create the initial commit? → Separate repo here
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● I wrote README.md and created a new git repo in /workshop/task-manager with
+  one commit, d955392, on main. It holds 16 files, and the working tree is
+  clean.
+
+  README sections
+  - Project description, features and how to run locally (venv, python app.py,
+    Docker).
+  - API documentation for all four endpoints. Each has a curl command, a sample
+    response and the error cases, plus the task object and the generic errors.
+  - How to run the tests (pytest tests/ -v) and how to deploy (a summary of the
+    ECS Fargate choice, linked to the deployment guide).
+  - Project structure, plus a Limitations section.
+
+  I added the Limitations section myself. It lists the missing persistence,
+  authentication and size limits, and the single-process requirement, because a
+  reader would otherwise assume more than the code does.
+
+  Git
+  - As you chose, I ran git init in /workshop/task-manager. It is a separate
+    repo from the /workshop repo, which also holds shopping-cart.
+  - I added a .gitignore for __pycache__, .pytest_cache and virtual
+    environments, so those aren't in the commit.
+  - The commit includes .claude/skills/run-tests and .mcp.json. The .mcp.json
+    only points at the public AWS knowledge server and contains no secrets.
+  - The commit message ends with the Co-Authored-By: Claude Sonnet 5.5 line.
+
+  The outer /workshop repo will now show task-manager as an embedded repository.
+  I haven't changed that repo, so nothing there is staged or committed.
+
+  Open from the review
+  - I haven't fixed the gaps the review found (concurrent delete, size limits,
+    stale architecture layout).
+  - The README says the same about the missing size limits and the architecture
+    mismatch.
+  - Say if you want those fixed.
+
+✻ Crunched for 37s · done 5:35 PM
+
+❯ Show me the final project structure and confirm all tests pass. Summarize     
+  what we built.                                                                
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● All 61 tests pass in 0.43s, and the working tree is clean at commit d955392.
+
+  Project structure
+
+  task-manager/
+  ├── app.py                    # Flask app: routes, TaskService, error 
+  handlers, create_app()
+  ├── models.py                 # Task dataclass, domain errors, in-memory 
+  repository
+  ├── requirements.txt          # flask, gunicorn, pytest
+  ├── pytest.ini
+  ├── Dockerfile                # gunicorn, one worker, non-root user
+  ├── docker-compose.yml
+  ├── .dockerignore / .gitignore
+  ├── README.md
+  ├── CLAUDE.md                 # project conventions for Claude Code
+  ├── .mcp.json                 # aws-knowledge MCP server
+  ├── .claude/skills/run-tests/SKILL.md
+  ├── tests/test_app.py         # 61 tests
+  └── docs/
+      ├── user-stories.md
+      ├── architecture.md
+      └── deployment-guide.md
+
+  What we built
+
+  - Requirements and design: six user stories with acceptance criteria, then an
+    architecture doc with a component diagram, data model, endpoints and
+    interaction flows.
+  - The API: Flask with in-memory storage. It supports create, list, complete
+    and delete, with input validation and a consistent {"error": "..."} format.
+  - Verification: the 61 tests are the only automated check. I also ran a manual
+    curl pass against the live server.
+  - Review: a subagent reviewed the code and found real gaps (listed below).
+  - Deployment: a Dockerfile, a docker-compose file and a deployment guide for
+    ECS Fargate. I chose Fargate over Lambda after looking up AWS guidance,
+    because in-memory state needs one long-lived process.
+  - Tooling: a CLAUDE.md, a /run-tests skill, a README, and a git repo with one
+    commit.
+
+  What isn't done or verified
+
+  - Review gaps are unfixed.
+    - A concurrent delete can be undone by a complete.
+    - The repository exposes its live objects.
+    - There are no size limits on input.
+    - Deeply nested JSON returns a 500.
+    - Control characters are accepted in titles.
+    - These are documented in the README, and none have tests.
+  - Docker and AWS are untested.
+    - The image was never built and compose was never run, because Docker isn't
+      installed here.
+    - I ran the container's start and health-check commands natively instead.
+    - The AWS commands in the guide haven't been run against an account.
+  - docs/architecture.md is partly stale. It describes separate routes/,
+    services/ and repositories/ modules, but the code uses the three-file layout
+    you asked for. US-3 also still allows either 404 or 400 for a bad ID, while
+    the code returns 404.
+  - Two repos. The project's git repo sits inside the outer /workshop repo,
+    which will show it as embedded.
+
+  The next step I'd suggest is fixing the review findings and adding tests for
+  them. I'd do the concurrency and size-limit fixes first.
+
+✻ Churned for 10s · done 5:38 PM
+
+※ recap: We built a Flask Task Manager API with tests, Docker files, docs and an AWS deployment guide, and it's committed with all 61 tests passing. Next, I'd fix the review gaps, starting with the concurrent-delete bug and the missing input size limits. (disable recaps in /config)
+
+❯ Add a priority field (high/medium/low) to tasks with the ability to filter by 
+  priority. Follow the same lifecycle: update user stories, update              
+  architecture, implement, test.                                                
+● I'll start with the user stories.
+
+● Update(docs/user-stories.md)
+  ⎿  Added 1 line
+       9  | `id`          | integer | Auto-generated, unique             
+              |
+      10  | `title`       | string  | Required, non-empty                
+              |
+      11  | `description` | string  | Optional, defaults to empty string 
+              |
+      12 +| `priority`    | string  | One of `high`, `medium`, `low`; def
+         +aults to `medium` |                                            
+      13  | `completed`   | boolean | Defaults to `false`                
+              |
+      14  | `created_at`  | string  | ISO 8601 timestamp, set on creation
+              |
+      15  
+
+● Update(docs/user-stories.md)
+  ⎿  Added 1 line, removed 1 line
+      24  ### Acceptance criteria
+      25  
+      26  - `POST /tasks` with a JSON body containing a non-empty `title`
+           returns `201 Created`.
+      27 -- The response body contains the created task, including a gene
+         -rated `id`, `completed` set to `false`, and `created_at`.      
+      27 +- The response body contains the created task, including a gene
+         +rated `id`, `priority`, `completed` set to `false`, and `create
+         +d_at`.                                                         
+      28  - `description` is optional; if omitted, it is stored as an emp
+          ty string.
+      29  - If `description` is provided, it is stored and returned uncha
+          nged.
+      30  - Each created task receives a unique `id`; IDs are not reused 
+          after deletion within a server session.
+
+● Update(docs/user-stories.md)
+  ⎿  Added 1 line, removed 1 line
+      43  ### Acceptance criteria
+      44  
+      45  - `GET /tasks` returns `200 OK` with a JSON array of all tasks.
+      46 -- Each task in the list includes `id`, `title`, `description`, 
+         -`completed`, and `created_at`.                                 
+      46 +- Each task in the list includes `id`, `title`, `description`, 
+         +`priority`, `completed`, and `created_at`.                     
+      47  - Both completed and incomplete tasks are included.
+      48  - Tasks are returned in creation order (oldest first).
+      49  - If no tasks exist, the API returns `200 OK` with an empty arr
+          ay (`[]`).
+
+● Update(docs/user-stories.md)
+  ⎿  Added 1 line
+      31  - If `title` is missing, empty, or whitespace only, the API ret
+          urns `400 Bad Request` with a JSON error message, and no task i
+          s created.
+      32  - If `title` or `description` is not a string, the API returns 
+          `400 Bad Request`.
+      33  - If the request body is missing or not valid JSON, the API ret
+          urns `400 Bad Request`.
+      34 +- Priority is covered by US-7.                                 
+      35  
+      36  ---
+      37  
+
+● Update(docs/user-stories.md)
+  ⎿  Added 37 lines, removed 1 line
+      116  
+      117  ---
+      118  
+      119 +## US-7: Assign a priority to a task                          
+      120 +                                                              
+      121 +**As a** user,                                                
+      122 +**I want to** give a task a priority of high, medium, or low w
+          +hen I create it,                                              
+      123 +**So that** I can tell which tasks matter most.               
+      124 +                                                              
+      125 +### Acceptance criteria                                       
+      126 +                                                              
+      127 +- `POST /tasks` accepts an optional `priority` field whose val
+          +ue is exactly `high`, `medium`, or `low` (lowercase).         
+      128 +- If `priority` is omitted or `null`, the task is created with
+          + `priority` set to `medium`.                                  
+      129 +- The created task, and every task returned by `GET /tasks`, i
+          +ncludes its `priority`.                                       
+      130 +- Completing a task (US-3) does not change its `priority`.    
+      131 +- If `priority` is any other value (for example `urgent`, `HIG
+          +H`, an empty string, a number, or a boolean), the API returns 
+          +`400 Bad Request` with a JSON error message naming the allowed
+          + values, and no task is created.                              
+      132 +                                                              
+      133 +---                                                           
+      134 +                                                              
+      135 +## US-8: Filter tasks by priority                             
+      136 +                                                              
+      137 +**As a** user,                                                
+      138 +**I want to** list only the tasks with a given priority,      
+      139 +**So that** I can focus on the most important work.           
+      140 +                                                              
+      141 +### Acceptance criteria                                       
+      142 +                                                              
+      143 +- `GET /tasks?priority=<value>` returns `200 OK` with only the
+          + tasks whose `priority` equals `<value>`.                     
+      144 +- `<value>` must be `high`, `medium`, or `low`.               
+      145 +- Matching tasks are returned in creation order, and both comp
+          +leted and incomplete tasks are included.                      
+      146 +- If no task matches, the API returns `200 OK` with an empty a
+          +rray.                                                         
+      147 +- `GET /tasks` without the `priority` parameter still returns 
+          +all tasks (US-2).                                             
+      148 +- If `priority` is not one of the allowed values (including an
+          + empty value), the API returns `400 Bad Request` with a JSON e
+          +rror message naming the allowed values.                       
+      149 +- Other query parameters are ignored.                         
+      150 +                                                              
+      151 +---                                                           
+      152 +                                                              
+      153  ## Out of scope
+      154  
+      155  - Authentication and multiple users
+      156  - Persistent storage
+      157  - Editing a task's title or description
+      158 +- Changing a task's priority after it is created              
+      159  - Marking a completed task as incomplete
+      125 -- Filtering, sorting, pagination, due dates, and priorities   
+      160 +- Sorting, pagination, and due dates                          
+      161 +- Filtering by anything other than priority                   
+
+● Now the architecture doc.
+
+● Update(docs/architecture.md)
+  ⎿  Added 1 line
+      86  | `id` | integer | generated | auto-increment from 1 | Unique, 
+          never reused after deletion in a session |
+      87  | `title` | string | yes | none | Stored trimmed, must be non-e
+          mpty |
+      88  | `description` | string | no | `""` | Stored unchanged |
+      89 +| `priority` | string | no | `"medium"` | One of `high`, `mediu
+         +m`, `low` (lowercase, exact match). Fixed at creation. |       
+      90  | `completed` | boolean | generated | `false` | Set to `true` b
+          y the complete endpoint |
+      91  | `created_at` | string | generated | creation time | ISO 8601 
+          UTC, e.g. `2026-10-22T09:30:00+00:00` |
+      92  
+
+● Update(docs/architecture.md)
+  ⎿  Added 1 line
+       98      id: int
+       99      title: str
+      100      description: str = ""
+      101 +    priority: str = "medium"        # one of PRIORITIES       
+      102      completed: bool = False
+      103      created_at: datetime = field(default_factory=lambda: datet
+           ime.now(timezone.utc))
+      104  ```
+
+● Update(docs/architecture.md)
+  ⎿  Added 2 lines
+      105  
+      106  `to_dict()` returns the JSON shape above, with `created_at` as
+            an ISO 8601 string.
+      107  
+      108 +The allowed priorities are defined once, as `PRIORITIES = ("hi
+          +gh", "medium", "low")` alongside the model, and `DEFAULT_PRIOR
+          +ITY = "medium"`. The service uses this constant to validate bo
+          +th the `priority` field on create and the `priority` query par
+          +ameter on list, so the two can never disagree.                
+      109 +                                                              
+      110  ### Storage
+      111  
+      112  - `_tasks: dict[int, Task]`. Python dicts keep insertion order
+           , so listing returns tasks in creation order (US-2).
+
+● Update(docs/architecture.md)
+  ⎿  Added 2 lines, removed 2 lines
+      122  
+      123  Request:
+      124  ```json
+      125 -{ "title": "Buy milk", "description": "2 litres, semi-skimmed"
+          - }                                                            
+      125 +{ "title": "Buy milk", "description": "2 litres, semi-skimmed"
+          +, "priority": "high" }                                        
+      126  ```
+      127 -`description` is optional.                                    
+      127 +`description` and `priority` are optional. `priority` must be 
+          +`high`, `medium` or `low`, and defaults to `medium` when omitt
+          +ed or `null`.                                                 
+      128  
+      129  Response `201 Created`:
+      130  ```json
+
+● Update(docs/architecture.md)
+  ⎿  Added 1 line
+      132    "id": 1,
+      133    "title": "Buy milk",
+      134    "description": "2 litres, semi-skimmed",
+      135 +  "priority": "high",                                         
+      136    "completed": false,
+      137    "created_at": "2026-10-22T09:30:00+00:00"
+      138  }
+
+● Update(docs/architecture.md)
+  ⎿  Added 6 lines, removed 4 lines
+      138  }
+      139  ```
+      140  
+      141 -Errors: `400` when the body is missing or is not valid JSON, w
+          -hen `title` is missing, empty or whitespace only, or when `tit
+          -le` or `description` is not a string.                         
+      141 +Errors: `400` when the body is missing or is not valid JSON, w
+          +hen `title` is missing, empty or whitespace only, or when `tit
+          +le` or `description` is not a string, or when `priority` is pr
+          +esent but not exactly `high`, `medium` or `low` (US-7). The er
+          +ror message names the allowed values.                         
+      142  
+      143 -### GET /tasks (US-2)                                         
+      143 +### GET /tasks (US-2, US-8)                                   
+      144  
+      145 -Request: none.                                                
+      145 +Request: none. Optional query parameter `priority=high|medium|
+          +low`.                                                         
+      146  
+      147 -Response `200 OK`: an array of task objects in creation order,
+          - completed and incomplete alike. An empty store returns `[]`. 
+      147 +Response `200 OK`: an array of task objects in creation order,
+          + completed and incomplete alike. An empty store, or a filter t
+          +hat matches nothing, returns `[]`. With `?priority=<value>`, o
+          +nly tasks with that priority are returned. Other query paramet
+          +ers are ignored.                                              
+      148  
+      149 +Errors: `400` when `priority` is present but is not exactly `h
+          +igh`, `medium` or `low`, including an empty value (`?priority=
+          +`). The query parameter is checked even when the store is empt
+          +y.                                                            
+      150 +                                                              
+      151  ### PATCH /tasks/{id}/complete (US-3)
+      152  
+      153  Request: no body.
+
+● Update(docs/architecture.md)
+  ⎿  Added 2 lines, removed 2 lines
+      189  ### Create task: `POST /tasks`
+      190  1. Flask routes the request to the `tasks` blueprint's create 
+           handler.
+      191  2. The handler reads the JSON body with `request.get_json(sile
+           nt=True)`. If the result is `None`, it raises `ValidationError
+           `.
+      192 -3. It calls `TaskService.create_task(title, description)`.    
+      193 -4. The service validates both fields, trims the title and defa
+          -ults `description` to `""`. On failure it raises `ValidationEr
+          -ror`.                                                         
+      192 +3. It calls `TaskService.create_task(title, description, prior
+          +ity)`.                                                        
+      193 +4. The service validates the fields, trims the title, defaults
+          + `description` to `""` and `priority` to `"medium"`, and check
+          +s `priority` against `PRIORITIES`. On failure it raises `Valid
+          +ationError`.                                                  
+      194  5. The service calls `repository.add(...)`. Under the lock, th
+           e repository assigns the next ID, builds the `Task`, stores it
+            and returns it.
+      195  6. The handler returns `task.to_dict()` with status `201`.
+      196  
+
+● Update(docs/architecture.md)
+  ⎿  Added 2 lines, removed 2 lines
+      195  6. The handler returns `task.to_dict()` with status `201`.
+      196  
+      197  ### List tasks: `GET /tasks`
+      198 -1. The handler calls `TaskService.list_tasks()`.              
+      199 -2. The service calls `repository.list()`, which returns the ta
+          -sks in insertion order.                                       
+      198 +1. The handler reads the optional `priority` query parameter (
+          +`request.args.get("priority")`, which is `None` when absent) a
+          +nd calls `TaskService.list_tasks(priority)`.                  
+      199 +2. The service rejects any non-`None` value that is not in `PR
+          +IORITIES` with `ValidationError` (400). It then calls `reposit
+          +ory.list()`, which returns the tasks in insertion order, and k
+          +eeps only those whose `priority` matches when a filter was giv
+          +en. Filtering lives in the service, so the repository interfac
+          +e does not change.                                            
+      200  3. The handler returns `[t.to_dict() for t in tasks]` with sta
+           tus `200`.
+      201  
+      202  ### Complete task: `PATCH /tasks/{id}/complete`
+
+● Update(docs/architecture.md)
+  ⎿  Added 2 lines
+      231  | `PATCH /tasks/{id}/complete` | The action changes part of an
+            existing task, so `PATCH` fits better than `PUT`. |
+      232  | `<int:id>` route converter | Rejects bad ids at routing time
+           , with one consistent 404 for all endpoints. |
+      233  | IDs never reused | Avoids a client acting on a stale id and 
+           hitting a different task. |
+      234 +| Priority filter in the service, via a query parameter | Filt
+          +ering is a business rule on a read, so the repository keeps it
+          +s small interface and a future database backend can add its ow
+          +n query later. A query parameter keeps `GET /tasks` one resour
+          +ce. |                                                         
+      235 +| Lowercase, exact-match priorities | One canonical stored val
+          +ue, no case normalisation to explain, and clients get an immed
+          +iate 400 on typos. |                                          
+      236  | Lock around the repository | Flask's dev server is threaded,
+            and the ID counter must not race. |
+      237  
+      238  Limitations, all intended for this scope:
+
+● Now the implementation.
+
+● Update(models.py)
+  ⎿  Added 4 lines
+       8  from typing import Any
+       9  
+      10  
+      11 +PRIORITIES: tuple[str, ...] = ("high", "medium", "low")        
+      12 +DEFAULT_PRIORITY = "medium"                                    
+      13 +                                                               
+      14 +                                                               
+      15  class ValidationError(Exception):
+      16      """Raised when client input is invalid (HTTP 400)."""
+      17  
+
+● Update(models.py)
+  ⎿  Added 1 line
+      37      id: int
+      38      title: str
+      39      description: str = ""
+      40 +    priority: str = DEFAULT_PRIORITY                           
+      41      completed: bool = False
+      42      created_at: datetime = field(default_factory=_utc_now)
+      43  
+
+● Update(models.py)
+  ⎿  Added 1 line
+      47              "id": self.id,
+      48              "title": self.title,
+      49              "description": self.description,
+      50 +            "priority": self.priority,                         
+      51              "completed": self.completed,
+      52              "created_at": self.created_at.isoformat(),
+      53          }
+
+● Update(models.py)
+  ⎿  Added 9 lines, removed 2 lines
+      67          self._next_id: int = 1
+      68          self._lock = threading.Lock()
+      69  
+      70 -    def add(self, title: str, description: str = "") -> Task:  
+      70 +    def add(                                                   
+      71 +        self, title: str, description: str = "", priority: str 
+         += DEFAULT_PRIORITY                                             
+      72 +    ) -> Task:                                                 
+      73          """Create, store and return a new task with a freshly a
+          ssigned id."""
+      74          with self._lock:
+      73 -            task = Task(id=self._next_id, title=title, descript
+         -ion=description)                                               
+      75 +            task = Task(                                       
+      76 +                id=self._next_id,                              
+      77 +                title=title,                                   
+      78 +                description=description,                       
+      79 +                priority=priority,                             
+      80 +            )                                                  
+      81              self._tasks[task.id] = task
+      82              self._next_id += 1
+      83              return task
+
+● Update(app.py)  ⎿  Added 2 lines
+      13  from werkzeug.exceptions import HTTPException
+      14  
+      15  from models import (
+      16 +    DEFAULT_PRIORITY,                                          
+      17 +    PRIORITIES,                                                
+      18      InMemoryTaskRepository,
+      19      Task,
+      20      TaskNotFoundError,
+
+● Update(app.py)
+  ⎿  Added 15 lines, removed 3 lines
+      31          """Create a service that stores tasks in the given repo
+          sitory."""
+      32          self._repository = repository
+      33  
+      34 -    def create_task(self, title: Any, description: Any = None) 
+         --> Task:                                                       
+      34 +    @staticmethod                                              
+      35 +    def _check_priority(priority: Any) -> str:                 
+      36 +        """Return priority if it is an allowed value, else rais
+         +e ValidationError."""                                          
+      37 +        if not isinstance(priority, str) or priority not in PRI
+         +ORITIES:                                                       
+      38 +            raise ValidationError(f"priority must be one of: {'
+         +, '.join(PRIORITIES)}")                                        
+      39 +        return priority                                        
+      40 +                                                               
+      41 +    def create_task(                                           
+      42 +        self, title: Any, description: Any = None, priority: An
+         +y = None                                                       
+      43 +    ) -> Task:                                                 
+      44          """Validate input and create a task.
+      45  
+      46 +        A missing or null priority defaults to "medium".       
+      47 +                                                               
+      48          Raises:
+      38 -            ValidationError: if title is missing, blank or not 
+         -a string, or                                                   
+      39 -                description is provided but not a string.      
+      49 +            ValidationError: if title is missing, blank or not 
+         +a string,                                                      
+      50 +                description is provided but not a string, or pr
+         +iority is                                                      
+      51 +                provided but not one of the allowed values.    
+      52          """
+      53          if not isinstance(title, str) or not title.strip():
+      54              raise ValidationError("title is required and must b
+          e a non-empty string")
+
+● Update(app.py)
+  ⎿  Added 14 lines, removed 4 lines
+      56              description = ""
+      57          elif not isinstance(description, str):
+      58              raise ValidationError("description must be a string
+          ")
+      59 -        return self._repository.add(title.strip(), description)
+      59 +        priority = DEFAULT_PRIORITY if priority is None else se
+         +lf._check_priority(priority)                                   
+      60 +        return self._repository.add(title.strip(), description,
+         + priority)                                                     
+      61  
+      61 -    def list_tasks(self) -> list[Task]:                        
+      62 -        """Return all tasks in creation order."""              
+      63 -        return self._repository.list()                         
+      62 +    def list_tasks(self, priority: str | None = None) -> list[T
+         +ask]:                                                          
+      63 +        """Return tasks in creation order, optionally only thos
+         +e with a priority.                                             
+      64  
+      65 +        Raises:                                                
+      66 +            ValidationError: if priority is given but not an al
+         +lowed value.                                                   
+      67 +        """                                                    
+      68 +        if priority is not None:                               
+      69 +            self._check_priority(priority)                     
+      70 +        tasks = self._repository.list()                        
+      71 +        if priority is None:                                   
+      72 +            return tasks                                       
+      73 +        return [t for t in tasks if t.priority == priority]    
+      74 +                                                               
+      75      def complete_task(self, task_id: int) -> Task:
+      76          """Mark a task as complete. Idempotent.
+      77  
+
+● Update(app.py)
+  ⎿  Added 9 lines, removed 3 lines
+      104          body = request.get_json(silent=True)
+      105          if not isinstance(body, dict):
+      106              raise ValidationError("request body must be a JSON
+            object")
+      107 -        task = service.create_task(body.get("title"), body.get
+          -("description"))                                              
+      107 +        task = service.create_task(                           
+      108 +            body.get("title"), body.get("description"), body.g
+          +et("priority")                                                
+      109 +        )                                                     
+      110          return jsonify(task.to_dict()), 201
+      111  
+      112      @bp.get("/tasks")
+      113      def list_tasks() -> tuple[Response, int]:
+      112 -        """List all tasks in creation order. Returns 200."""  
+      113 -        return jsonify([t.to_dict() for t in service.list_task
+          -s()]), 200                                                    
+      114 +        """List tasks in creation order, optionally filtered b
+          +y ?priority=.                                                 
+      115  
+      116 +        Returns 200, or 400 if the priority filter is not an a
+          +llowed value.                                                 
+      117 +        """                                                   
+      118 +        tasks = service.list_tasks(request.args.get("priority"
+          +))                                                            
+      119 +        return jsonify([t.to_dict() for t in tasks]), 200     
+      120 +                                                              
+      121      @bp.patch("/tasks/<int:task_id>/complete")
+      122      def complete_task(task_id: int) -> tuple[Response, int]:
+      123          """Mark a task as complete. Returns 200 with the updat
+           ed task."""
+
+● Next the tests. The existing TASK_FIELDS check will need the new field, and
+  I'll add tests for US-7 and US-8.
+
+● Update(tests/test_app.py)
+  ⎿  Added 1 line, removed 1 line
+      12  from app import TaskService, create_app
+      13  from models import InMemoryTaskRepository, TaskNotFoundError, V
+          alidationError
+      14  
+      15 -TASK_FIELDS = {"id", "title", "description", "completed", "crea
+         -ted_at"}                                                       
+      15 +TASK_FIELDS = {"id", "title", "description", "priority", "compl
+         +eted", "created_at"}                                           
+      16  
+      17  
+      18  @pytest.fixture
+
+● Update(tests/test_app.py)
+  ⎿  Added 133 lines
+      370          assert create(second, "new")["id"] == 1
+      371  
+      372  
+      373 +# --- US-7: priority -----------------------------------------
+          +---------------                                               
+      374 +                                                              
+      375 +                                                              
+      376 +class TestPriority:                                           
+      377 +    """The priority field on POST /tasks."""                  
+      378 +                                                              
+      379 +    @pytest.mark.parametrize("priority", ["high", "medium", "l
+          +ow"])                                                         
+      380 +    def test_create_with_each_valid_priority(                 
+      381 +        self, client: FlaskClient, priority: str              
+      382 +    ) -> None:                                                
+      383 +        """Each allowed priority is stored and returned."""   
+      384 +        response = client.post("/tasks", json={"title": "t", "
+          +priority": priority})                                         
+      385 +        assert response.status_code == 201                    
+      386 +        assert response.get_json()["priority"] == priority    
+      387 +                                                              
+      388 +    def test_priority_defaults_to_medium_when_omitted(        
+      389 +        self, client: FlaskClient                             
+      390 +    ) -> None:                                                
+      391 +        """No priority means medium."""                       
+      392 +        assert create(client)["priority"] == "medium"         
+      393 +                                                              
+      394 +    def test_null_priority_defaults_to_medium(self, client: Fl
+          +askClient) -> None:                                           
+      395 +        """An explicit null is treated as omitted."""         
+      396 +        assert create(client, priority=None)["priority"] == "m
+          +edium"                                                        
+      397 +                                                              
+      398 +    def test_priority_appears_in_list(self, client: FlaskClien
+          +t) -> None:                                                   
+      399 +        """GET /tasks includes each task's priority."""       
+      400 +        create(client, "a", priority="high")                  
+      401 +        create(client, "b")                                   
+      402 +        priorities = [t["priority"] for t in client.get("/task
+          +s").get_json()]                                               
+      403 +        assert priorities == ["high", "medium"]               
+      404 +                                                              
+      405 +    def test_complete_keeps_priority(self, client: FlaskClient
+          +) -> None:                                                    
+      406 +        """Completing a task does not change its priority.""" 
+      407 +        task = create(client, priority="low")                 
+      408 +        body = client.patch(f"/tasks/{task['id']}/complete").g
+          +et_json()                                                     
+      409 +        assert body["priority"] == "low"                      
+      410 +                                                              
+      411 +    @pytest.mark.parametrize(                                 
+      412 +        "priority", ["urgent", "HIGH", "High", " high", "high 
+          +", "", 1, True, ["high"]]                                     
+      413 +    )                                                         
+      414 +    def test_invalid_priority_rejected(                       
+      415 +        self, client: FlaskClient, priority: Any              
+      416 +    ) -> None:                                                
+      417 +        """Anything other than the exact lowercase values retu
+          +rns 400."""                                                   
+      418 +        response = client.post("/tasks", json={"title": "t", "
+          +priority": priority})                                         
+      419 +        assert response.status_code == 400                    
+      420 +        error = response.get_json()["error"]                  
+      421 +        assert "priority" in error                            
+      422 +        assert "high, medium, low" in error                   
+      423 +                                                              
+      424 +    def test_invalid_priority_creates_nothing(self, client: Fl
+          +askClient) -> None:                                           
+      425 +        """A rejected create stores nothing and does not consu
+          +me an id."""                                                  
+      426 +        client.post("/tasks", json={"title": "t", "priority": 
+          +"urgent"})                                                    
+      427 +        assert client.get("/tasks").get_json() == []          
+      428 +        assert create(client)["id"] == 1                      
+      429 +                                                              
+      430 +                                                              
+      431 +# --- US-8: filter by priority -------------------------------
+          +---------------                                               
+      432 +                                                              
+      433 +                                                              
+      434 +class TestFilterByPriority:                                   
+      435 +    """GET /tasks?priority=<value>."""                        
+      436 +                                                              
+      437 +    @pytest.fixture                                           
+      438 +    def seeded(self, client: FlaskClient) -> FlaskClient:     
+      439 +        """Return a client whose store has tasks of every prio
+          +rity."""                                                      
+      440 +        create(client, "h1", priority="high")                 
+      441 +        create(client, "m1")                                  
+      442 +        create(client, "l1", priority="low")                  
+      443 +        create(client, "h2", priority="high")                 
+      444 +        return client                                         
+      445 +                                                              
+      446 +    @pytest.mark.parametrize(                                 
+      447 +        ("priority", "expected"),                             
+      448 +        [("high", ["h1", "h2"]), ("medium", ["m1"]), ("low", [
+          +"l1"])],                                                      
+      449 +    )                                                         
+      450 +    def test_filter_returns_only_matching_in_creation_order(  
+      451 +        self, seeded: FlaskClient, priority: str, expected: li
+          +st[str]                                                       
+      452 +    ) -> None:                                                
+      453 +        """Only tasks with the requested priority come back, o
+          +ldest first."""                                               
+      454 +        response = seeded.get(f"/tasks?priority={priority}")  
+      455 +        assert response.status_code == 200                    
+      456 +        assert [t["title"] for t in response.get_json()] == ex
+          +pected                                                        
+      457 +                                                              
+      458 +    def test_no_filter_returns_everything(self, seeded: FlaskC
+          +lient) -> None:                                               
+      459 +        """Without the parameter all tasks are returned."""   
+      460 +        assert len(seeded.get("/tasks").get_json()) == 4      
+      461 +                                                              
+      462 +    def test_filter_with_no_match_returns_empty_list(self, cli
+          +ent: FlaskClient) -> None:                                    
+      463 +        """A valid filter that matches nothing returns 200 and
+          + []."""                                                       
+      464 +        create(client, priority="low")                        
+      465 +        response = client.get("/tasks?priority=high")         
+      466 +        assert response.status_code == 200                    
+      467 +        assert response.get_json() == []                      
+      468 +                                                              
+      469 +    def test_filter_includes_completed_tasks(self, client: Fla
+          +skClient) -> None:                                            
+      470 +        """Completed and incomplete tasks both match."""      
+      471 +        done = create(client, "done", priority="high")        
+      472 +        create(client, "open", priority="high")               
+      473 +        client.patch(f"/tasks/{done['id']}/complete")         
+      474 +        flags = [t["completed"] for t in client.get("/tasks?pr
+          +iority=high").get_json()]                                     
+      475 +        assert flags == [True, False]                         
+      476 +                                                              
+      477 +    def test_deleted_tasks_are_not_returned(self, seeded: Flas
+          +kClient) -> None:                                             
+      478 +        """A deleted task disappears from the filtered list.""
+          +"                                                             
+      479 +        seeded.delete("/tasks/1")                             
+      480 +        titles = [t["title"] for t in seeded.get("/tasks?prior
+          +ity=high").get_json()]                                        
+      481 +        assert titles == ["h2"]                               
+      482 +                                                              
+      483 +    @pytest.mark.parametrize("value", ["urgent", "HIGH", "", "
+          + high", "1"])                                                 
+      484 +    def test_invalid_filter_rejected(self, seeded: FlaskClient
+          +, value: str) -> None:                                        
+      485 +        """An unknown or empty priority filter returns 400 nam
+          +ing the options."""                                           
+      486 +        response = seeded.get("/tasks", query_string={"priorit
+          +y": value})                                                   
+      487 +        assert response.status_code == 400                    
+      488 +        error = response.get_json()["error"]                  
+      489 +        assert "high, medium, low" in error                   
+      490 +                                                              
+      491 +    def test_invalid_filter_rejected_on_empty_store(self, clie
+          +nt: FlaskClient) -> None:                                     
+      492 +        """The filter value is validated even when there are n
+          +o tasks."""                                                   
+      493 +        assert client.get("/tasks?priority=urgent").status_cod
+          +e == 400                                                      
+      494 +                                                              
+      495 +    def test_other_query_parameters_are_ignored(self, seeded: 
+          +FlaskClient) -> None:                                         
+      496 +        """Unknown parameters do not affect the result."""    
+      497 +        response = seeded.get("/tasks?color=red&priority=low")
+      498 +        assert [t["title"] for t in response.get_json()] == ["
+          +l1"]                                                          
+      499 +                                                              
+      500 +    def test_filter_does_not_modify_data(self, seeded: FlaskCl
+          +ient) -> None:                                                
+      501 +        """Filtering is read-only."""                         
+      502 +        seeded.get("/tasks?priority=high")                    
+      503 +        assert len(seeded.get("/tasks").get_json()) == 4      
+      504 +                                                              
+      505 +                                                              
+      506  # --- Service and repository units (no HTTP) -----------------
+           ---------------
+      507  
+      508  
+
+● Update(tests/test_app.py)
+  ⎿  Added 13 lines
+      526          with pytest.raises(TaskNotFoundError):
+      527              service.delete_task(1)
+      528  
+      529 +    def test_service_priority_default_and_filter(self) -> None
+          +:                                                             
+      530 +        """The service defaults priority, filters on it, and v
+          +alidates the filter."""                                       
+      531 +        service = TaskService(InMemoryTaskRepository())       
+      532 +        default = service.create_task("a")                    
+      533 +        high = service.create_task("b", priority="high")      
+      534 +        assert default.priority == "medium"                   
+      535 +        assert service.list_tasks("high") == [high]           
+      536 +        assert service.list_tasks() == [default, high]        
+      537 +        with pytest.raises(ValidationError):                  
+      538 +            service.list_tasks("urgent")                      
+      539 +        with pytest.raises(ValidationError):                  
+      540 +            service.create_task("c", priority="urgent")       
+      541 +                                                              
+      542      def test_repository_basics(self) -> None:
+      543          """The repository adds, gets, updates and deletes."""
+      544          repo = InMemoryTaskRepository()
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● All 94 tests pass. I'll update the README to match, since it documents the API
+  and the test count.
+
+● Update(README.md)
+  ⎿  Added 2 lines, removed 1 line
+       5  ## Features
+       6  
+       7  - Create a task with a title and an optional description
+       8 -- List all tasks, oldest first                                 
+       8 +- Give a task a priority (`high`, `medium` or `low`, default `m
+         +edium`)                                                        
+       9 +- List all tasks, oldest first, or only those with a given prio
+         +rity                                                           
+      10  - Mark a task as complete (repeatable without error)
+      11  - Delete a task
+      12  - JSON in, JSON out, with one consistent error format: `{"error
+          ": "<message>"}`
+
+● Update(README.md)
+  ⎿  Added 1 line
+      61  | `id` | integer | Assigned by the server, starting at 1 |
+      62  | `title` | string | Required, trimmed, must not be blank |
+      63  | `description` | string | Optional, defaults to `""` |
+      64 +| `priority` | string | `high`, `medium` or `low` (lowercase, e
+         +xact). Defaults to `medium` |                                  
+      65  | `completed` | boolean | `false` until completed |
+      66  | `created_at` | string | ISO 8601 UTC timestamp |
+      67  
+
+● Update(README.md)
+  ⎿  Added 8 lines, removed 2 lines
+       72  ```bash
+       73  curl -X POST http://localhost:5000/tasks \
+       74    -H 'Content-Type: application/json' \
+       75 -  -d '{"title": "Buy milk", "description": "2 litres"}'       
+       75 +  -d '{"title": "Buy milk", "description": "2 litres", "priori
+          +ty": "high"}'                                                 
+       76  ```
+       77  
+       78 +`description` and `priority` are optional.                    
+       79 +                                                              
+       80  `201 Created`
+       81  ```json
+       82  {
+       83    "id": 1,
+       84    "title": "Buy milk",
+       85    "description": "2 litres",
+       86 +  "priority": "high",                                         
+       87    "completed": false,
+       88    "created_at": "2026-10-22T17:04:17.409016+00:00"
+       89  }
+       90  ```
+       91  
+       89 -`400 Bad Request` if the body is missing, is not a JSON object
+          -, or has a missing, blank or non-string `title`, or a non-stri
+          -ng `description`:                                             
+       92 +`400 Bad Request` if the body is missing or is not a JSON obje
+          +ct, if `title` is missing, blank or not a string, if `descript
+          +ion` is not a string, or if `priority` is not exactly `high`, 
+          +`medium` or `low`:                                            
+       93  ```json
+       94  { "error": "title is required and must be a non-empty string" 
+           }
+       95  ```
+       96 +```json                                                       
+       97 +{ "error": "priority must be one of: high, medium, low" }     
+       98 +```                                                           
+       99  
+      100  ### List tasks
+      101  
+
+● Update(README.md)
+  ⎿  Added 10 lines, removed 1 line
+      101  
+      102  `GET /tasks`
+      103  
+      104 +Optional query parameter: `priority=high|medium|low`.         
+      105 +                                                              
+      106  ```bash
+      107  curl http://localhost:5000/tasks
+      108 +curl "http://localhost:5000/tasks?priority=high"              
+      109  ```
+      110  
+      108 -`200 OK` returns an array in creation order, or `[]` if there 
+          -are none:                                                     
+      111 +`200 OK` returns an array in creation order, or `[]` if there 
+          +are none or none match the filter:                            
+      112  ```json
+      113  [
+      114    {
+      115      "id": 1,
+      116      "title": "Buy milk",
+      117      "description": "2 litres",
+      118 +    "priority": "high",                                       
+      119      "completed": false,
+      120      "created_at": "2026-10-22T17:04:17.409016+00:00"
+      121    }
+      122  ]
+      123  ```
+      124  
+      125 +`400 Bad Request` if `priority` is present but is not exactly 
+          +`high`, `medium` or `low` (an empty `?priority=` counts):     
+      126 +```json                                                       
+      127 +{ "error": "priority must be one of: high, medium, low" }     
+      128 +```                                                           
+      129 +                                                              
+      130  ### Mark a task complete
+      131  
+      132  `PATCH /tasks/{id}/complete`
+
+● Update(README.md)
+  ⎿  Added 1 line, removed 1 line
+      169  pytest tests/ -v
+      170  ```
+      171  
+      172 -The suite in `tests/test_app.py` has 61 tests covering all fou
+          -r operations, input validation, error responses and the storag
+          -e layers. Every test builds a fresh app, so tests don't affect
+          - each other.                                                  
+      172 +The suite in `tests/test_app.py` has 94 tests covering all fou
+          +r operations, priority and priority filtering, input validatio
+          +n, error responses and the storage layers. Every test builds a
+          + fresh app, so tests don't affect each other.                 
+      173  
+      174  ## Deployment
+      175  
+
+● Update(README.md)
+  ⎿  Added 1 line, removed 1 line
+      204  - **Single process only.** Run exactly one worker or task, or 
+           each will hold a different task list.
+      205  - **No authentication.** Don't expose the API to the internet 
+           without something in front of it.
+      206  - **No input size limits.** Very large titles, descriptions or
+            request bodies are accepted.
+      207 -- No editing of a task's title or description, and no way to m
+          -ark a task incomplete.                                        
+      207 +- No editing of a task's title, description or priority, and n
+          +o way to mark a task incomplete.                              
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● Tasks now have a priority field (high, medium or low), and GET /tasks can
+  filter on it. All 94 tests pass: the original 61, which I updated for the new
+  field, plus 33 new ones. The changes are uncommitted, since you didn't ask for
+  a commit.
+
+  I made the design decisions myself and put them in the docs:
+  - Default: a task created without a priority, or with null, gets medium.
+  - Exact values: only lowercase high, medium and low are accepted. HIGH, " 
+    high", an empty string, numbers and booleans all return 400.
+  - Error message: the 400 reads priority must be one of: high, medium, low.
+  - Filter: GET /tasks?priority=high returns only matching tasks, oldest first,
+    completed ones included. A filter that matches nothing returns 200 []. A bad
+    or empty value (?priority=) returns 400, even when no tasks exist. Other
+    query parameters are ignored.
+  - Fixed at creation: there's no way to change a task's priority afterwards,
+    which is consistent with the existing "no editing" scope.
+
+  What changed, by stage
+  1. User stories: I added US-7 (assign a priority) and US-8 (filter by
+     priority). I also added priority to the task model, US-1 and US-2, and
+     moved "changing priority later" into out of scope.
+  2. Architecture: the data model, the POST and GET definitions, the interaction
+     flows and the design-decisions table now cover priority. Filtering happens
+     in the service, so the repository interface is unchanged. The allowed
+     values are defined once (PRIORITIES), so create and filter validation can't
+     drift apart.
+  3. Implementation: models.py has PRIORITIES, DEFAULT_PRIORITY, Task.priority
+     and the new add parameter. app.py has _check_priority and the updated
+     create, list and route handlers.
+  4. Tests: TestPriority and TestFilterByPriority cover valid and invalid
+     values, defaults, filter ordering and completed tasks. They also cover
+     deleted tasks, the empty store and ignored extra parameters. There is also
+     one service-level test.
+
+  I also updated the README: the API docs, the feature list, the test count and
+  the limitations. The Dockerfile and deployment guide needed no changes.
+
+  The architecture doc is still stale in the ways I mentioned earlier. It
+  describes the multi-module layout instead of the three-file one, and I did not
+  fix that here.
+
+✻ Cooked for 1m 19s · done 5:44 PM
+
+❯ Add a due date field and an endpoint that returns overdue tasks. Write tests  
+  for the new functionality.                                                    
+
+● I'll follow the same lifecycle: stories, architecture, implementation, tests,
+  README. First, two design decisions. "Overdue" depends on today's date, so
+  I'll inject a clock into the service to make tests deterministic. Due dates
+  will be date-only (YYYY-MM-DD), parsed strictly, because Python's
+  fromisoformat also accepts looser forms like 20261022.
+
+● Update(models.py)
+  ⎿  Added 1 line, removed 1 line
+       4  
+       5  import threading
+       6  from dataclasses import dataclass, field
+       7 -from datetime import datetime, timezone                        
+       7 +from datetime import date, datetime, timezone                  
+       8  from typing import Any
+       9  
+      10  
+
+● Update(models.py)
+  ⎿  Added 1 line
+      38      title: str
+      39      description: str = ""
+      40      priority: str = DEFAULT_PRIORITY
+      41 +    due_date: date | None = None                               
+      42      completed: bool = False
+      43      created_at: datetime = field(default_factory=_utc_now)
+      44  
+
+● Update(models.py)
+  ⎿  Added 1 line
+      49              "title": self.title,
+      50              "description": self.description,
+      51              "priority": self.priority,
+      52 +            "due_date": self.due_date.isoformat() if self.due_d
+         +ate else None,                                                 
+      53              "completed": self.completed,
+      54              "created_at": self.created_at.isoformat(),
+      55          }
+
+● Update(models.py)  ⎿  Added 6 lines, removed 1 line
+      70          self._lock = threading.Lock()
+      71  
+      72      def add(
+      73 -        self, title: str, description: str = "", priority: str 
+         -= DEFAULT_PRIORITY                                             
+      73 +        self,                                                  
+      74 +        title: str,                                            
+      75 +        description: str = "",                                 
+      76 +        priority: str = DEFAULT_PRIORITY,                      
+      77 +        due_date: date | None = None,                          
+      78      ) -> Task:
+      79          """Create, store and return a new task with a freshly a
+          ssigned id."""
+      80          with self._lock:
+     ...
+      83                  title=title,
+      84                  description=description,
+      85                  priority=priority,
+      86 +                due_date=due_date,                             
+      87              )
+      88              self._tasks[task.id] = task
+      89              self._next_id += 1
+
+● Update(app.py)
+  ⎿  Added 3 lines
+       7  from __future__ import annotations
+       8  
+       9  import logging
+      10 +import re                                                      
+      11 +from collections.abc import Callable                           
+      12 +from datetime import date, datetime, timezone                  
+      13  from typing import Any
+      14  
+      15  from flask import Blueprint, Flask, Response, jsonify, request
+
+● Update(app.py)
+  ⎿  Added 35 lines, removed 2 lines
+      26  
+      27  logger = logging.getLogger(__name__)
+      28  
+      29 +_DATE_FORMAT = re.compile(r"\d{4}-\d{2}-\d{2}")                
+      30  
+      31 +                                                               
+      32 +def _utc_today() -> date:                                      
+      33 +    """Return today's date in UTC."""                          
+      34 +    return datetime.now(timezone.utc).date()                   
+      35 +                                                               
+      36 +                                                               
+      37  class TaskService:
+      38      """Validation and business rules for tasks. Knows nothing a
+          bout HTTP."""
+      39  
+      33 -    def __init__(self, repository: InMemoryTaskRepository) -> N
+         -one:                                                           
+      34 -        """Create a service that stores tasks in the given repo
+         -sitory."""                                                     
+      40 +    def __init__(                                              
+      41 +        self,                                                  
+      42 +        repository: InMemoryTaskRepository,                    
+      43 +        clock: Callable[[], date] = _utc_today,                
+      44 +    ) -> None:                                                 
+      45 +        """Create a service that stores tasks in the given repo
+         +sitory.                                                        
+      46 +                                                               
+      47 +        clock returns today's date and decides what counts as o
+         +verdue. It is                                                  
+      48 +        a parameter so tests can fix the date.                 
+      49 +        """                                                    
+      50          self._repository = repository
+      51 +        self._clock = clock                                    
+      52  
+      53      @staticmethod
+      54 +    def _parse_due_date(value: Any) -> date | None:            
+      55 +        """Return the due date for a YYYY-MM-DD string, or None
+         + for null.                                                     
+      56 +                                                               
+      57 +        Raises:                                                
+      58 +            ValidationError: if value is not a real calendar da
+         +te in                                                          
+      59 +                YYYY-MM-DD form.                               
+      60 +        """                                                    
+      61 +        if value is None:                                      
+      62 +            return None                                        
+      63 +        if isinstance(value, str) and _DATE_FORMAT.fullmatch(va
+         +lue):                                                          
+      64 +            try:                                               
+      65 +                return date.fromisoformat(value)               
+      66 +            except ValueError:                                 
+      67 +                pass                                           
+      68 +        raise ValidationError("due_date must be a valid date in
+         + YYYY-MM-DD format")                                           
+      69 +                                                               
+      70 +    @staticmethod                                              
+      71      def _check_priority(priority: Any) -> str:
+      72          """Return priority if it is an allowed value, else rais
+          e ValidationError."""
+      73          if not isinstance(priority, str) or priority not in PRI
+          ORITIES:
+
+● Update(app.py)
+  ⎿  Added 11 lines, removed 4 lines
+      75          return priority
+      76  
+      77      def create_task(
+      78 -        self, title: Any, description: Any = None, priority: An
+         -y = None                                                       
+      78 +        self,                                                  
+      79 +        title: Any,                                            
+      80 +        description: Any = None,                               
+      81 +        priority: Any = None,                                  
+      82 +        due_date: Any = None,                                  
+      83      ) -> Task:
+      84          """Validate input and create a task.
+      85  
+      82 -        A missing or null priority defaults to "medium".       
+      86 +        A missing or null priority defaults to "medium"; a miss
+         +ing or null                                                    
+      87 +        due_date means the task has no due date. A due date in 
+         +the past is                                                    
+      88 +        allowed.                                               
+      89  
+      90          Raises:
+      91              ValidationError: if title is missing, blank or not 
+          a string,
+      86 -                description is provided but not a string, or pr
+         -iority is                                                      
+      87 -                provided but not one of the allowed values.    
+      92 +                description is provided but not a string, prior
+         +ity is                                                         
+      93 +                provided but not one of the allowed values, or 
+         +due_date is                                                    
+      94 +                provided but not a valid YYYY-MM-DD date.      
+      95          """
+      96          if not isinstance(title, str) or not title.strip():
+      97              raise ValidationError("title is required and must b
+          e a non-empty string")
+
+● Update(app.py)
+  ⎿  Added 2 lines, removed 1 line
+      100          elif not isinstance(description, str):
+      101              raise ValidationError("description must be a strin
+           g")
+      102          priority = DEFAULT_PRIORITY if priority is None else s
+           elf._check_priority(priority)
+      103 -        return self._repository.add(title.strip(), description
+          -, priority)                                                   
+      103 +        due = self._parse_due_date(due_date)                  
+      104 +        return self._repository.add(title.strip(), description
+          +, priority, due)                                              
+      105  
+      106      def list_tasks(self, priority: str | None = None) -> list[
+           Task]:
+      107          """Return tasks in creation order, optionally only tho
+           se with a priority.
+
+● Update(app.py)
+  ⎿  Added 14 lines
+      116              return tasks
+      117          return [t for t in tasks if t.priority == priority]
+      118  
+      119 +    def list_overdue_tasks(self) -> list[Task]:               
+      120 +        """Return incomplete tasks whose due date is before to
+          +day.                                                          
+      121 +                                                              
+      122 +        A task due today is not overdue yet. Results are order
+          +ed by due date                                                
+      123 +        (most overdue first), then by creation order.         
+      124 +        """                                                   
+      125 +        today = self._clock()                                 
+      126 +        overdue = [                                           
+      127 +            t                                                 
+      128 +            for t in self._repository.list()                  
+      129 +            if not t.completed and t.due_date is not None and 
+          +t.due_date < today                                            
+      130 +        ]                                                     
+      131 +        return sorted(overdue, key=lambda t: (t.due_date, t.id
+          +))                                                            
+      132 +                                                              
+      133      def complete_task(self, task_id: int) -> Task:
+      134          """Mark a task as complete. Idempotent.
+      135  
+
+● Update(app.py)
+  ⎿  Added 4 lines, removed 1 line
+      163          if not isinstance(body, dict):
+      164              raise ValidationError("request body must be a JSON
+            object")
+      165          task = service.create_task(
+      166 -            body.get("title"), body.get("description"), body.g
+          -et("priority")                                                
+      166 +            body.get("title"),                                
+      167 +            body.get("description"),                          
+      168 +            body.get("priority"),                             
+      169 +            body.get("due_date"),                             
+      170          )
+      171          return jsonify(task.to_dict()), 201
+      172  
+
+● Update(app.py)
+  ⎿  Added 5 lines
+      179          tasks = service.list_tasks(request.args.get("priority"
+           ))
+      180          return jsonify([t.to_dict() for t in tasks]), 200
+      181  
+      182 +    @bp.get("/tasks/overdue")                                 
+      183 +    def list_overdue_tasks() -> tuple[Response, int]:         
+      184 +        """List incomplete tasks that are past their due date.
+          + Returns 200."""                                              
+      185 +        return jsonify([t.to_dict() for t in service.list_over
+          +due_tasks()]), 200                                            
+      186 +                                                              
+      187      @bp.patch("/tasks/<int:task_id>/complete")
+      188      def complete_task(task_id: int) -> tuple[Response, int]:
+      189          """Mark a task as complete. Returns 200 with the updat
+           ed task."""
+
+● Update(app.py)
+  ⎿  Added 6 lines, removed 3 lines
+      228          return _error_response("internal server error", 500)
+      229  
+      230  
+      231 -def create_app() -> Flask:                                    
+      232 -    """Application factory. Each call returns an app with its 
+          -own empty store."""                                           
+      231 +def create_app(clock: Callable[[], date] = _utc_today) -> Flas
+          +k:                                                            
+      232 +    """Application factory. Each call returns an app with its 
+          +own empty store.                                              
+      233 +                                                              
+      234 +    clock supplies today's date for overdue checks; tests pass
+          + a fixed one.                                                 
+      235 +    """                                                       
+      236      app = Flask(__name__)
+      234 -    service = TaskService(InMemoryTaskRepository())           
+      237 +    service = TaskService(InMemoryTaskRepository(), clock)    
+      238      app.register_blueprint(create_tasks_blueprint(service))
+      239      register_error_handlers(app)
+      240      return app
+
+● Update(app.py)
+  ⎿  Added 1 line, removed 1 line
+      26  
+      27  logger = logging.getLogger(__name__)
+      28  
+      29 -_DATE_FORMAT = re.compile(r"\d{4}-\d{2}-\d{2}")                
+      29 +_DATE_FORMAT = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}")       
+      30  
+      31  
+      32  def _utc_today() -> date:
+
+● Update(tests/test_app.py)
+  ⎿  Added 10 lines, removed 1 line
+      12  from app import TaskService, create_app
+      13  from models import InMemoryTaskRepository, TaskNotFoundError, V
+          alidationError
+      14  
+      15 -TASK_FIELDS = {"id", "title", "description", "priority", "compl
+         -eted", "created_at"}                                           
+      15 +TASK_FIELDS = {                                                
+      16 +    "id",                                                      
+      17 +    "title",                                                   
+      18 +    "description",                                             
+      19 +    "priority",                                                
+      20 +    "due_date",                                                
+      21 +    "completed",                                               
+      22 +    "created_at",                                              
+      23 +}                                                              
+      24 +TODAY = date(2026, 6, 15)                                      
+      25  
+      26  
+      27  @pytest.fixture
+
+● Update(tests/test_app.py)
+  ⎿  Added 1 line, removed 1 line
+      2  
+      3  from __future__ import annotations
+      4  
+      5 -from datetime import datetime                                   
+      5 +from datetime import date, datetime                             
+      6  from typing import Any
+      7  
+      8  import pytest
+
+● Update(tests/test_app.py)
+  ⎿  Added 234 lines
+      512          assert len(seeded.get("/tasks").get_json()) == 4
+      513  
+      514  
+      515 +# --- US-9: due date -----------------------------------------
+          +---------------                                               
+      516 +                                                              
+      517 +                                                              
+      518 +class TestDueDate:                                            
+      519 +    """The due_date field on POST /tasks."""                  
+      520 +                                                              
+      521 +    def test_create_with_due_date(self, client: FlaskClient) -
+          +> None:                                                       
+      522 +        """A valid date is stored and returned in YYYY-MM-DD f
+          +orm."""                                                       
+      523 +        response = client.post("/tasks", json={"title": "t", "
+          +due_date": "2026-10-22"})                                     
+      524 +        assert response.status_code == 201                    
+      525 +        assert response.get_json()["due_date"] == "2026-10-22"
+      526 +                                                              
+      527 +    def test_due_date_defaults_to_null(self, client: FlaskClie
+          +nt) -> None:                                                  
+      528 +        """No due date is represented as null."""             
+      529 +        assert create(client)["due_date"] is None             
+      530 +                                                              
+      531 +    def test_null_due_date_accepted(self, client: FlaskClient)
+          + -> None:                                                     
+      532 +        """An explicit null means no due date."""             
+      533 +        assert create(client, due_date=None)["due_date"] is No
+          +ne                                                            
+      534 +                                                              
+      535 +    def test_past_due_date_allowed(self, client: FlaskClient) 
+          +-> None:                                                      
+      536 +        """A due date in the past can be set."""              
+      537 +        assert create(client, due_date="2000-01-01")["due_date
+          +"] == "2000-01-01"                                            
+      538 +                                                              
+      539 +    def test_leap_day_accepted(self, client: FlaskClient) -> N
+          +one:                                                          
+      540 +        """A real leap day is valid."""                       
+      541 +        assert create(client, due_date="2024-02-29")["due_date
+          +"] == "2024-02-29"                                            
+      542 +                                                              
+      543 +    def test_due_date_appears_in_list(self, client: FlaskClien
+          +t) -> None:                                                   
+      544 +        """GET /tasks includes each task's due date."""       
+      545 +        create(client, "a", due_date="2026-10-22")            
+      546 +        create(client, "b")                                   
+      547 +        dates = [t["due_date"] for t in client.get("/tasks").g
+          +et_json()]                                                    
+      548 +        assert dates == ["2026-10-22", None]                  
+      549 +                                                              
+      550 +    def test_complete_keeps_due_date(self, client: FlaskClient
+          +) -> None:                                                    
+      551 +        """Completing a task does not change its due date.""" 
+      552 +        task = create(client, due_date="2026-10-22")          
+      553 +        body = client.patch(f"/tasks/{task['id']}/complete").g
+          +et_json()                                                     
+      554 +        assert body["due_date"] == "2026-10-22"               
+      555 +                                                              
+      556 +    @pytest.mark.parametrize(                                 
+      557 +        "value",                                              
+      558 +        [                                                     
+      559 +            "2026-13-01",  # month out of range               
+      560 +            "2026-02-30",  # day does not exist               
+      561 +            "2025-02-29",  # not a leap year                  
+      562 +            "2026-00-10",                                     
+      563 +            "26-01-01",                                       
+      564 +            "2026-1-1",                                       
+      565 +            "20261022",  # basic ISO form, rejected on purpose
+      566 +            "2026-W43-4",  # ISO week date, rejected on purpos
+          +e                                                             
+      567 +            "2026-10-22T10:00:00",  # datetime, not a date    
+      568 +            "2026-10-22 ",                                    
+      569 +            " 2026-10-22",                                    
+      570 +            "22/10/2026",                                     
+      571 +            "tomorrow",                                       
+      572 +            "",                                               
+      573 +            20261022,                                         
+      574 +            True,                                             
+      575 +            ["2026-10-22"],                                   
+      576 +            {"date": "2026-10-22"},                           
+      577 +        ],                                                    
+      578 +    )                                                         
+      579 +    def test_invalid_due_date_rejected(self, client: FlaskClie
+          +nt, value: Any) -> None:                                      
+      580 +        """Anything other than a real YYYY-MM-DD date returns 
+          +400."""                                                       
+      581 +        response = client.post("/tasks", json={"title": "t", "
+          +due_date": value})                                            
+      582 +        assert response.status_code == 400                    
+      583 +        error = response.get_json()["error"]                  
+      584 +        assert "due_date" in error and "YYYY-MM-DD" in error  
+      585 +                                                              
+      586 +    def test_invalid_due_date_creates_nothing(self, client: Fl
+          +askClient) -> None:                                           
+      587 +        """A rejected create stores nothing and does not consu
+          +me an id."""                                                  
+      588 +        client.post("/tasks", json={"title": "t", "due_date": 
+          +"nope"})                                                      
+      589 +        assert client.get("/tasks").get_json() == []          
+      590 +        assert create(client)["id"] == 1                      
+      591 +                                                              
+      592 +                                                              
+      593 +# --- US-10: overdue tasks -----------------------------------
+          +---------------                                               
+      594 +                                                              
+      595 +                                                              
+      596 +@pytest.fixture                                               
+      597 +def overdue_client() -> FlaskClient:                          
+      598 +    """Return a client whose notion of today is fixed at TODAY
+          +."""                                                          
+      599 +    return create_app(clock=lambda: TODAY).test_client()      
+      600 +                                                              
+      601 +                                                              
+      602 +def titles(client: FlaskClient, path: str = "/tasks/overdue") 
+          +-> list[str]:                                                 
+      603 +    """Return the titles from a list endpoint."""             
+      604 +    return [t["title"] for t in client.get(path).get_json()]  
+      605 +                                                              
+      606 +                                                              
+      607 +class TestOverdueTasks:                                       
+      608 +    """GET /tasks/overdue."""                                 
+      609 +                                                              
+      610 +    def test_empty_store(self, overdue_client: FlaskClient) ->
+          + None:                                                        
+      611 +        """With no tasks the endpoint returns 200 and an empty
+          + array."""                                                    
+      612 +        response = overdue_client.get("/tasks/overdue")       
+      613 +        assert response.status_code == 200                    
+      614 +        assert response.mimetype == "application/json"        
+      615 +        assert response.get_json() == []                      
+      616 +                                                              
+      617 +    def test_includes_incomplete_past_due_task(               
+      618 +        self, overdue_client: FlaskClient                     
+      619 +    ) -> None:                                                
+      620 +        """A task due before today and not completed is overdu
+          +e."""                                                         
+      621 +        create(overdue_client, "late", due_date="2026-06-14") 
+      622 +        response = overdue_client.get("/tasks/overdue")       
+      623 +        body = response.get_json()                            
+      624 +        assert [t["title"] for t in body] == ["late"]         
+      625 +        assert set(body[0]) == TASK_FIELDS                    
+      626 +        assert body[0]["completed"] is False                  
+      627 +                                                              
+      628 +    def test_task_due_today_is_not_overdue(self, overdue_clien
+          +t: FlaskClient) -> None:                                      
+      629 +        """The due date itself is still on time."""           
+      630 +        create(overdue_client, "today", due_date="2026-06-15")
+      631 +        assert titles(overdue_client) == []                   
+      632 +                                                              
+      633 +    def test_future_task_is_not_overdue(self, overdue_client: 
+          +FlaskClient) -> None:                                         
+      634 +        """A task due after today is not overdue."""          
+      635 +        create(overdue_client, "later", due_date="2026-06-16")
+      636 +        assert titles(overdue_client) == []                   
+      637 +                                                              
+      638 +    def test_task_without_due_date_is_not_overdue(            
+      639 +        self, overdue_client: FlaskClient                     
+      640 +    ) -> None:                                                
+      641 +        """A task with no due date can never be overdue."""   
+      642 +        create(overdue_client, "open-ended")                  
+      643 +        assert titles(overdue_client) == []                   
+      644 +                                                              
+      645 +    def test_completed_task_is_not_overdue(self, overdue_clien
+          +t: FlaskClient) -> None:                                      
+      646 +        """Finishing a late task removes it from the overdue l
+          +ist."""                                                       
+      647 +        task = create(overdue_client, "late", due_date="2026-0
+          +1-01")                                                        
+      648 +        assert titles(overdue_client) == ["late"]             
+      649 +        overdue_client.patch(f"/tasks/{task['id']}/complete") 
+      650 +        assert titles(overdue_client) == []                   
+      651 +                                                              
+      652 +    def test_deleted_task_is_not_returned(self, overdue_client
+          +: FlaskClient) -> None:                                       
+      653 +        """A deleted task disappears from the overdue list."""
+      654 +        task = create(overdue_client, "late", due_date="2026-0
+          +1-01")                                                        
+      655 +        overdue_client.delete(f"/tasks/{task['id']}")         
+      656 +        assert titles(overdue_client) == []                   
+      657 +                                                              
+      658 +    def test_only_matching_tasks_are_returned(                
+      659 +        self, overdue_client: FlaskClient                     
+      660 +    ) -> None:                                                
+      661 +        """Overdue, on-time, future, undated and completed tas
+          +ks are told apart."""                                         
+      662 +        create(overdue_client, "late", due_date="2026-06-01") 
+      663 +        create(overdue_client, "today", due_date="2026-06-15")
+      664 +        create(overdue_client, "future", due_date="2027-01-01"
+          +)                                                             
+      665 +        create(overdue_client, "undated")                     
+      666 +        done = create(overdue_client, "late-but-done", due_dat
+          +e="2026-06-02")                                               
+      667 +        overdue_client.patch(f"/tasks/{done['id']}/complete") 
+      668 +        assert titles(overdue_client) == ["late"]             
+      669 +                                                              
+      670 +    def test_ordered_by_due_date_then_creation(               
+      671 +        self, overdue_client: FlaskClient                     
+      672 +    ) -> None:                                                
+      673 +        """The most overdue task comes first; ties keep creati
+          +on order."""                                                  
+      674 +        create(overdue_client, "c", due_date="2026-06-10")    
+      675 +        create(overdue_client, "a", due_date="2026-05-01")    
+      676 +        create(overdue_client, "d", due_date="2026-06-10")    
+      677 +        create(overdue_client, "b", due_date="2026-05-01")    
+      678 +        assert titles(overdue_client) == ["a", "b", "c", "d"] 
+      679 +                                                              
+      680 +    def test_all_overdue_tasks_regardless_of_priority(        
+      681 +        self, overdue_client: FlaskClient                     
+      682 +    ) -> None:                                                
+      683 +        """Priority does not affect which tasks are overdue.""
+          +"                                                             
+      684 +        for priority in ("high", "medium", "low"):            
+      685 +            create(overdue_client, priority, priority=priority
+          +, due_date="2026-01-01")                                      
+      686 +        assert sorted(titles(overdue_client)) == ["high", "low
+          +", "medium"]                                                  
+      687 +                                                              
+      688 +    def test_other_query_parameters_are_ignored(              
+      689 +        self, overdue_client: FlaskClient                     
+      690 +    ) -> None:                                                
+      691 +        """Unknown parameters, including priority, do not chan
+          +ge the result."""                                             
+      692 +        create(overdue_client, "late", priority="low", due_dat
+          +e="2026-01-01")                                               
+      693 +        assert titles(overdue_client, "/tasks/overdue?priority
+          +=high&x=1") == ["late"]                                       
+      694 +                                                              
+      695 +    def test_endpoint_is_read_only(self, overdue_client: Flask
+          +Client) -> None:                                              
+      696 +        """Reading overdue tasks changes nothing."""          
+      697 +        create(overdue_client, "late", due_date="2026-01-01") 
+      698 +        first = overdue_client.get("/tasks/overdue").get_json(
+          +)                                                             
+      699 +        assert overdue_client.get("/tasks/overdue").get_json()
+          + == first                                                     
+      700 +        assert len(overdue_client.get("/tasks").get_json()) ==
+          + 1                                                            
+      701 +                                                              
+      702 +    def test_result_follows_the_clock(self) -> None:          
+      703 +        """A task becomes overdue once today passes its due da
+          +te."""                                                        
+      704 +        today = [date(2026, 6, 15)]                           
+      705 +        client = create_app(clock=lambda: today[0]).test_clien
+          +t()                                                           
+      706 +        create(client, "t", due_date="2026-06-15")            
+      707 +        assert titles(client) == []                           
+      708 +        today[0] = date(2026, 6, 16)                          
+      709 +        assert titles(client) == ["t"]                        
+      710 +                                                              
+      711 +    def test_uses_real_date_by_default(self, client: FlaskClie
+          +nt) -> None:                                                  
+      712 +        """Without an injected clock the real current date is 
+          +used."""                                                      
+      713 +        create(client, "long-gone", due_date="2000-01-01")    
+      714 +        create(client, "far-future", due_date="2999-12-31")   
+      715 +        assert titles(client) == ["long-gone"]                
+      716 +                                                              
+      717 +    def test_task_listing_still_includes_overdue_tasks(       
+      718 +        self, overdue_client: FlaskClient                     
+      719 +    ) -> None:                                                
+      720 +        """GET /tasks is unaffected by overdue status."""     
+      721 +        create(overdue_client, "late", due_date="2026-01-01") 
+      722 +        assert titles(overdue_client, "/tasks") == ["late"]   
+      723 +                                                              
+      724 +                                                              
+      725 +class TestOverdueRouting:                                     
+      726 +    """/tasks/overdue must not collide with /tasks/<id>."""   
+      727 +                                                              
+      728 +    def test_overdue_is_not_treated_as_an_id(self, overdue_cli
+          +ent: FlaskClient) -> None:                                    
+      729 +        """GET /tasks/overdue is the overdue list, not a 404."
+          +""                                                            
+      730 +        assert overdue_client.get("/tasks/overdue").status_cod
+          +e == 200                                                      
+      731 +                                                              
+      732 +    def test_delete_overdue_is_405(self, overdue_client: Flask
+          +Client) -> None:                                              
+      733 +        """Only GET is supported, and the error is the standar
+          +d JSON shape."""                                              
+      734 +        response = overdue_client.delete("/tasks/overdue")    
+      735 +        assert response.status_code == 405                    
+      736 +        assert set(response.get_json()) == {"error"}          
+      737 +                                                              
+      738 +    def test_complete_on_overdue_is_404(self, overdue_client: 
+          +FlaskClient) -> None:                                         
+      739 +        """'overdue' is not an integer id, so the id routes do
+          + not match it."""                                             
+      740 +        assert overdue_client.patch("/tasks/overdue/complete")
+          +.status_code == 404                                           
+      741 +                                                              
+      742 +    def test_integer_id_routes_still_work(self, overdue_client
+          +: FlaskClient) -> None:                                       
+      743 +        """Adding the overdue route does not disturb the id-ba
+          +sed routes."""                                                
+      744 +        task = create(overdue_client, "t")                    
+      745 +        assert overdue_client.patch(f"/tasks/{task['id']}/comp
+          +lete").status_code == 200                                     
+      746 +        assert overdue_client.delete(f"/tasks/{task['id']}").s
+          +tatus_code == 204                                             
+      747 +                                                              
+      748 +                                                              
+      749  # --- Service and repository units (no HTTP) -----------------
+           ---------------
+      750  
+      751  
+
+● Update(tests/test_app.py)
+  ⎿  Added 11 lines
+      782          with pytest.raises(ValidationError):
+      783              service.create_task("c", priority="urgent")
+      784  
+      785 +    def test_service_due_date_and_overdue(self) -> None:      
+      786 +        """The service parses due dates and uses its clock for
+          + overdue checks."""                                           
+      787 +        service = TaskService(InMemoryTaskRepository(), clock=
+          +lambda: TODAY)                                                
+      788 +        late = service.create_task("late", due_date="2026-06-1
+          +4")                                                           
+      789 +        service.create_task("today", due_date="2026-06-15")   
+      790 +        service.create_task("none")                           
+      791 +        assert late.due_date == date(2026, 6, 14)             
+      792 +        assert service.list_overdue_tasks() == [late]         
+      793 +        with pytest.raises(ValidationError):                  
+      794 +            service.create_task("bad", due_date="2026-02-30") 
+      795 +                                                              
+      796      def test_repository_basics(self) -> None:
+      797          """The repository adds, gets, updates and deletes."""
+      798          repo = InMemoryTaskRepository()
+
+  Ran 1 shell command (ctrl+o to expand)
+
+● All 140 pass: the 94 from before plus 46 new. Now I'll bring the docs in line,
+  starting with the user stories.
+
+● Update(docs/user-stories.md)
+  ⎿  Added 1 line
+      10  | `title`       | string  | Required, non-empty                
+              |
+      11  | `description` | string  | Optional, defaults to empty string 
+              |
+      12  | `priority`    | string  | One of `high`, `medium`, `low`; def
+          aults to `medium` |
+      13 +| `due_date`    | string or null | `YYYY-MM-DD` date; `null` wh
+         +en not set |                                                   
+      14  | `completed`   | boolean | Defaults to `false`                
+              |
+      15  | `created_at`  | string  | ISO 8601 timestamp, set on creation
+              |
+      16  
+
+● Update(docs/user-stories.md)
+  ⎿  Added 1 line, removed 1 line
+      25  ### Acceptance criteria
+      26  
+      27  - `POST /tasks` with a JSON body containing a non-empty `title`
+           returns `201 Created`.
+      28 -- The response body contains the created task, including a gene
+         -rated `id`, `priority`, `completed` set to `false`, and `create
+         -d_at`.                                                         
+      28 +- The response body contains the created task, including a gene
+         +rated `id`, `priority`, `due_date`, `completed` set to `false`,
+         + and `created_at`.                                             
+      29  - `description` is optional; if omitted, it is stored as an emp
+          ty string.
+      30  - If `description` is provided, it is stored and returned uncha
+          nged.
+      31  - Each created task receives a unique `id`; IDs are not reused 
+          after deletion within a server session.
+
+● Update(docs/user-stories.md)
+  ⎿  Added 1 line, removed 1 line
+      45  ### Acceptance criteria
+      46  
+      47  - `GET /tasks` returns `200 OK` with a JSON array of all tasks.
+      48 -- Each task in the list includes `id`, `title`, `description`, 
+         -`priority`, `completed`, and `created_at`.                     
+      48 +- Each task in the list includes `id`, `title`, `description`, 
+         +`priority`, `due_date`, `completed`, and `created_at`.         
+      49  - Both completed and incomplete tasks are included.
+      50  - Tasks are returned in creation order (oldest first).
+      51  - If no tasks exist, the API returns `200 OK` with an empty arr
+          ay (`[]`).
+
+● Update(docs/user-stories.md)
+  ⎿  Added 1 line, removed 1 line
+      32  - If `title` is missing, empty, or whitespace only, the API ret
+          urns `400 Bad Request` with a JSON error message, and no task i
+          s created.
+      33  - If `title` or `description` is not a string, the API returns 
+          `400 Bad Request`.
+      34  - If the request body is missing or not valid JSON, the API ret
+          urns `400 Bad Request`.
+      35 -- Priority is covered by US-7.                                 
+      35 +- Priority is covered by US-7 and due date by US-9.            
+      36  
+      37  ---
+      38  
+
+● Update(docs/user-stories.md)
+  ⎿  Added 43 lines, removed 3 lines
+      151  
+      152  ---
+      153  
+      154 +## US-9: Set a due date on a task                             
+      155 +                                                              
+      156 +**As a** user,                                                
+      157 +**I want to** give a task a due date when I create it,        
+      158 +**So that** I know when it needs to be finished.              
+      159 +                                                              
+      160 +### Acceptance criteria                                       
+      161 +                                                              
+      162 +- `POST /tasks` accepts an optional `due_date` field, a calend
+          +ar date written as `YYYY-MM-DD` (for example `2026-10-22`).   
+      163 +- If `due_date` is omitted or `null`, the task has no due date
+          + and `due_date` is `null` in responses.                       
+      164 +- The created task, and every task returned by `GET /tasks`, i
+          +ncludes its `due_date`.                                       
+      165 +- A due date in the past is accepted.                         
+      166 +- Completing a task (US-3) does not change its `due_date`.    
+      167 +- If `due_date` is not a real date in exactly that format, the
+          + API returns `400 Bad Request` with a JSON error message menti
+          +oning `YYYY-MM-DD`, and no task is created. This covers imposs
+          +ible dates (`2026-02-30`, `2025-02-29`), other formats (`20261
+          +022`, `22/10/2026`, `2026-W43-4`), date-times (`2026-10-22T10:
+          +00:00`), strings with extra whitespace, empty strings, and non
+          +-strings.                                                     
+      168 +                                                              
+      169 +---                                                           
+      170 +                                                              
+      171 +## US-10: List overdue tasks                                  
+      172 +                                                              
+      173 +**As a** user,                                                
+      174 +**I want to** see which tasks are overdue,                    
+      175 +**So that** I can deal with work that has slipped past its due
+          + date.                                                        
+      176 +                                                              
+      177 +### Acceptance criteria                                       
+      178 +                                                              
+      179 +- `GET /tasks/overdue` returns `200 OK` with a JSON array of o
+          +verdue tasks.                                                 
+      180 +- A task is overdue when it has a `due_date` earlier than toda
+          +y's date (UTC) **and** is not completed.                      
+      181 +- A task due today is not overdue until the next day.         
+      182 +- Tasks with no due date, tasks due today or later, and comple
+          +ted tasks are not returned.                                   
+      183 +- Overdue tasks are ordered by `due_date`, earliest first, and
+          + tasks with the same due date keep creation order.            
+      184 +- Each task includes all task fields.                         
+      185 +- If no task is overdue, the API returns `200 OK` with an empt
+          +y array.                                                      
+      186 +- Completing or deleting an overdue task removes it from the r
+          +esult.                                                        
+      187 +- Query parameters are ignored; in particular the priority fil
+          +ter of US-8 does not apply to this endpoint.                  
+      188 +- Only `GET` is supported; other methods on `/tasks/overdue` r
+          +eturn `405 Method Not Allowed`.                               
+      189 +- `GET /tasks` is unaffected and still returns overdue tasks a
+          +long with all others.                                         
+      190 +                                                              
+      191 +---                                                           
+      192 +                                                              
+      193  ## Out of scope
+      194  
+      195  - Authentication and multiple users
+      196  - Persistent storage
+      158 -- Editing a task's title or description                       
+      159 -- Changing a task's priority after it is created              
+      197 +- Editing a task's title, description, priority, or due date a
+          +fter it is created                                            
+      198  - Marking a completed task as incomplete
+      161 -- Sorting, pagination, and due dates                          
+      199 +- Sorting and pagination                                      
+      200  - Filtering by anything other than priority
+      201 +- Time of day or time zones for due dates (dates are compared 
+          +against the UTC date)                                         
+      202 +- Combining the overdue list with the priority filter         
+
+● Update(docs/architecture.md)  ⎿  Added 1 line
+      87  | `title` | string | yes | none | Stored trimmed, must be non-e
+          mpty |
+      88  | `description` | string | no | `""` | Stored unchanged |
+      89  | `priority` | string | no | `"medium"` | One of `high`, `mediu
+          m`, `low` (lowercase, exact match). Fixed at creation. |
+      90 +| `due_date` | string or null | no | `null` | Calendar date `YY
+         +YY-MM-DD`, stored as a `datetime.date`. Past dates are allowed.
+         + Fixed at creation. |                                          
+      91  | `completed` | boolean | generated | `false` | Set to `true` b
+          y the complete endpoint |
+      92  | `created_at` | string | generated | creation time | ISO 8601 
+          UTC, e.g. `2026-10-22T09:30:00+00:00` |
+      93  
+
+● Update(docs/architecture.md)
+  ⎿  Added 1 line
+      100      title: str
+      101      description: str = ""
+      102      priority: str = "medium"        # one of PRIORITIES
+      103 +    due_date: date | None = None                              
+      104      completed: bool = False
+      105      created_at: datetime = field(default_factory=lambda: datet
+           ime.now(timezone.utc))
+      106  ```
+
+● Update(docs/architecture.md)
+  ⎿  Added 1 line, removed 1 line
+      126  ```json
+      127  { "title": "Buy milk", "description": "2 litres, semi-skimmed"
+           , "priority": "high" }
+      128  ```
+      129 -`description` and `priority` are optional. `priority` must be 
+          -`high`, `medium` or `low`, and defaults to `medium` when omitt
+          -ed or `null`.                                                 
+      129 +`description`, `priority` and `due_date` are optional. `priori
+          +ty` must be `high`, `medium` or `low`, and defaults to `medium
+          +` when omitted or `null`. `due_date` must be a real date writt
+          +en `YYYY-MM-DD` (for example `"2026-10-22"`), and defaults to 
+          +`null`.                                                       
+      130  
+      131  Response `201 Created`:
+      132  ```json
+
+● Update(docs/architecture.md)
+  ⎿  Added 2 lines, removed 1 line
+      135    "title": "Buy milk",
+      136    "description": "2 litres, semi-skimmed",
+      137    "priority": "high",
+      138 +  "due_date": "2026-10-22",                                   
+      139    "completed": false,
+      140    "created_at": "2026-10-22T09:30:00+00:00"
+      141  }
+      142  ```
+      143  
+      143 -Errors: `400` when the body is missing or is not valid JSON, w
+          -hen `title` is missing, empty or whitespace only, or when `tit
+          -le` or `description` is not a string, or when `priority` is pr
+          -esent but not exactly `high`, `medium` or `low` (US-7). The er
+          -ror message names the allowed values.                         
+      144 +Errors: `400` when `due_date` is present but is not a real dat
+          +e in strict `YYYY-MM-DD` form (US-9); the message is `due_date
+          + must be a valid date in YYYY-MM-DD format`. Also `400` when t
+          +he body is missing or is not valid JSON, when `title` is missi
+          +ng, empty or whitespace only, or when `title` or `description`
+          + is not a string, or when `priority` is present but not exactl
+          +y `high`, `medium` or `low` (US-7). The error message names th
+          +e allowed values.                                             
+      145  
+      146  ### GET /tasks (US-2, US-8)
+      147  
+
+● Update(docs/architecture.md)
+  ⎿  Added 8 lines
+      151  
+      152  Errors: `400` when `priority` is present but is not exactly `h
+           igh`, `medium` or `low`, including an empty value (`?priority=
+           `). The query parameter is checked even when the store is empt
+           y.
+      153  
+      154 +### GET /tasks/overdue (US-10)                                
+      155 +                                                              
+      156 +Request: none. Query parameters are ignored.                  
+      157 +                                                              
+      158 +Response `200 OK`: an array of task objects that are **not com
+          +pleted** and have a `due_date` strictly earlier than today's U
+          +TC date, ordered by `due_date` ascending and then by `id`. Ret
+          +urns `[]` when nothing is overdue. A task due today is not ove
+          +rdue.                                                         
+      159 +                                                              
+      160 +Only `GET` is routed. Other methods return `405`. Because the 
+          +route uses the literal `overdue` and the id routes use `<int:t
+          +ask_id>`, the two never match the same URL.                   
+      161 +                                                              
+      162  ### PATCH /tasks/{id}/complete (US-3)
+      163  
+      164  Request: no body.
+
+● Update(docs/architecture.md)
+  ⎿  Added 2 lines, removed 2 lines
+      200  ### Create task: `POST /tasks`
+      201  1. Flask routes the request to the `tasks` blueprint's create 
+           handler.
+      202  2. The handler reads the JSON body with `request.get_json(sile
+           nt=True)`. If the result is `None`, it raises `ValidationError
+           `.
+      203 -3. It calls `TaskService.create_task(title, description, prior
+          -ity)`.                                                        
+      204 -4. The service validates the fields, trims the title, defaults
+          - `description` to `""` and `priority` to `"medium"`, and check
+          -s `priority` against `PRIORITIES`. On failure it raises `Valid
+          -ationError`.                                                  
+      203 +3. It calls `TaskService.create_task(title, description, prior
+          +ity, due_date)`.                                              
+      204 +4. The service validates the fields, trims the title, defaults
+          + `description` to `""` and `priority` to `"medium"`, and check
+          +s `priority` against `PRIORITIES`. It parses `due_date` with a
+          + strict `YYYY-MM-DD` pattern check followed by `date.fromisofo
+          +rmat`, so impossible dates and the looser ISO forms Python wou
+          +ld otherwise accept (`20261022`, week dates) are rejected. `nu
+          +ll` or a missing value means no due date. On failure it raises
+          + `ValidationError`.                                           
+      205  5. The service calls `repository.add(...)`. Under the lock, th
+           e repository assigns the next ID, builds the `Task`, stores it
+            and returns it.
+      206  6. The handler returns `task.to_dict()` with status `201`.
+      207  
+
+● Update(docs/architecture.md)
+  ⎿  Added 7 lines
+      210  2. The service rejects any non-`None` value that is not in `PR
+           IORITIES` with `ValidationError` (400). It then calls `reposit
+           ory.list()`, which returns the tasks in insertion order, and k
+           eeps only those whose `priority` matches when a filter was giv
+           en. Filtering lives in the service, so the repository interfac
+           e does not change.
+      211  3. The handler returns `[t.to_dict() for t in tasks]` with sta
+           tus `200`.
+      212  
+      213 +### List overdue tasks: `GET /tasks/overdue`                  
+      214 +1. The handler calls `TaskService.list_overdue_tasks()`.      
+      215 +2. The service asks its clock for today's date, reads all task
+          +s with `repository.list()`, and keeps those that are not compl
+          +eted and have a `due_date` before today. It sorts them by `(du
+          +e_date, id)`.                                                 
+      216 +3. The handler returns the tasks as JSON with status `200`.   
+      217 +                                                              
+      218 +The clock is a `Callable[[], date]` passed to `TaskService` (a
+          +nd through `create_app(clock=...)`). It defaults to today's UT
+          +C date. Tests inject a fixed date so overdue behaviour, includ
+          +ing the "due today" boundary, is deterministic. Overdue is com
+          +puted on each request and never stored, so it cannot go stale.
+      219 +                                                              
+      220  ### Complete task: `PATCH /tasks/{id}/complete`
+      221  1. The handler passes the integer `id` to `TaskService.complet
+           e_task(id)`.
+      222  2. The service calls `repository.get(id)`. If the result is `N
+           one`, it raises `TaskNotFoundError`.
+
+● Update(docs/architecture.md)
+  ⎿  Added 3 lines
+      250  | `<int:id>` route converter | Rejects bad ids at routing time
+           , with one consistent 404 for all endpoints. |
+      251  | IDs never reused | Avoids a client acting on a stale id and 
+           hitting a different task. |
+      252  | Priority filter in the service, via a query parameter | Filt
+           ering is a business rule on a read, so the repository keeps it
+           s small interface and a future database backend can add its ow
+           n query later. A query parameter keeps `GET /tasks` one resour
+           ce. |
+      253 +| Date-only due dates, compared with the UTC date | Avoids tim
+          +e zones and times of day, which the stories do not need. "Over
+          +due" means the due date has fully passed. |                   
+      254 +| Overdue computed on request, with an injectable clock | Noth
+          +ing to keep up to date, and tests can fix "today". |          
+      255 +| Separate `GET /tasks/overdue` endpoint | Overdue is a derive
+          +d view (incomplete and past due), not a stored field, so it ge
+          +ts its own resource instead of overloading `GET /tasks` filter
+          +s. |                                                          
+      256  | Lowercase, exact-match priorities | One canonical stored val
+           ue, no case normalisation to explain, and clients get an immed
+           iate 400 on typos. |
+      257  | Lock around the repository | Flask's dev server is threaded,
+            and the ID counter must not race. |
+      258  
+
+● Now the README.
+
+● Update(README.md)
+  ⎿  Added 1 line
+       6  
+       7  - Create a task with a title and an optional description
+       8  - Give a task a priority (`high`, `medium` or `low`, default `m
+          edium`)
+       9 +- Set an optional due date (`YYYY-MM-DD`) and list overdue task
+         +s                                                              
+      10  - List all tasks, oldest first, or only those with a given prio
+          rity
+      11  - Mark a task as complete (repeatable without error)
+      12  - Delete a task
+
+● Update(README.md)
+  ⎿  Added 1 line
+      63  | `title` | string | Required, trimmed, must not be blank |
+      64  | `description` | string | Optional, defaults to `""` |
+      65  | `priority` | string | `high`, `medium` or `low` (lowercase, e
+          xact). Defaults to `medium` |
+      66 +| `due_date` | string or null | Optional date in `YYYY-MM-DD` f
+         +orm, otherwise `null` |                                        
+      67  | `completed` | boolean | `false` until completed |
+      68  | `created_at` | string | ISO 8601 UTC timestamp |
+      69  
+
+● Update(README.md)
+  ⎿  Added 3 lines, removed 2 lines
+      74  ```bash
+      75  curl -X POST http://localhost:5000/tasks \
+      76    -H 'Content-Type: application/json' \
+      77 -  -d '{"title": "Buy milk", "description": "2 litres", "priorit
+         -y": "high"}'                                                   
+      77 +  -d '{"title": "Buy milk", "description": "2 litres", "priorit
+         +y": "high", "due_date": "2026-10-22"}'                         
+      78  ```
+      79  
+      80 -`description` and `priority` are optional.                     
+      80 +`description`, `priority` and `due_date` are optional.         
+      81  
+      82  `201 Created`
+      83  ```json
+     ...
+      86    "title": "Buy milk",
+      87    "description": "2 litres",
+      88    "priority": "high",
+      89 +  "due_date": "2026-10-22",                                    
+      90    "completed": false,
+      91    "created_at": "2026-10-22T17:04:17.409016+00:00"
+      92  }
+
+● Update(README.md)
+  ⎿  Added 4 lines, removed 1 line
+       92  }
+       93  ```
+       94  
+       95 -`400 Bad Request` if the body is missing or is not a JSON obje
+          -ct, if `title` is missing, blank or not a string, if `descript
+          -ion` is not a string, or if `priority` is not exactly `high`, 
+          -`medium` or `low`:                                            
+       95 +`400 Bad Request` if the body is missing or is not a JSON obje
+          +ct, if `title` is missing, blank or not a string, if `descript
+          +ion` is not a string, if `priority` is not exactly `high`, `me
+          +dium` or `low`, or if `due_date` is not a real date written `Y
+          +YYY-MM-DD`:                                                   
+       96  ```json
+       97  { "error": "title is required and must be a non-empty string" 
+           }
+       98  ```
+       99  ```json
+      100  { "error": "priority must be one of: high, medium, low" }
+      101  ```
+      102 +```json                                                       
+      103 +{ "error": "due_date must be a valid date in YYYY-MM-DD format
+          +" }                                                           
+      104 +```                                                           
+      105  
+      106  ### List tasks
+      107  
+
+● Update(README.md)
+  ⎿  Added 25 lines
+      122      "title": "Buy milk",
+      123      "description": "2 litres",
+      124      "priority": "high",
+      125 +    "due_date": "2026-10-22",                                 
+      126      "completed": false,
+      127      "created_at": "2026-10-22T17:04:17.409016+00:00"
+      128    }
+     ...
+      134  { "error": "priority must be one of: high, medium, low" }
+      135  ```
+      136  
+      137 +### List overdue tasks                                        
+      138 +                                                              
+      139 +`GET /tasks/overdue`                                          
+      140 +                                                              
+      141 +```bash                                                       
+      142 +curl http://localhost:5000/tasks/overdue                      
+      143 +```                                                           
+      144 +                                                              
+      145 +`200 OK` returns the tasks that are **not completed** and whos
+          +e `due_date` is before today's date (UTC), ordered by due date
+          + with the most overdue first. A task due today is not overdue 
+          +yet, and tasks with no due date never are. Returns `[]` when n
+          +othing is overdue. Query parameters are ignored.              
+      146 +                                                              
+      147 +```json                                                       
+      148 +[                                                             
+      149 +  {                                                           
+      150 +    "id": 3,                                                  
+      151 +    "title": "Renew passport",                                
+      152 +    "description": "",                                        
+      153 +    "priority": "medium",                                     
+      154 +    "due_date": "2026-09-30",                                 
+      155 +    "completed": false,                                       
+      156 +    "created_at": "2026-09-01T08:00:00+00:00"                 
+      157 +  }                                                           
+      158 +]                                                             
+      159 +```                                                           
+      160 +                                                              
+      161  ### Mark a task complete
+      162  
+      163  `PATCH /tasks/{id}/complete`
+
+● Update(README.md)
+  ⎿  Added 1 line, removed 1 line
+      200  pytest tests/ -v
+      201  ```
+      202  
+      203 -The suite in `tests/test_app.py` has 94 tests covering all fou
+          -r operations, priority and priority filtering, input validatio
+          -n, error responses and the storage layers. Every test builds a
+          - fresh app, so tests don't affect each other.                 
+      203 +The suite in `tests/test_app.py` has 140 tests covering all fo
+          +ur operations, priority and priority filtering, due dates and 
+          +overdue tasks, input validation, error responses and the stora
+          +ge layers. Every test builds a fresh app, so tests don't affec
+          +t each other.                                                 
+      204  
+      205  ## Deployment
+      206  
+
+● Update(README.md)
+  ⎿  Added 2 lines, removed 1 line
+      235  - **Single process only.** Run exactly one worker or task, or 
+           each will hold a different task list.
+      236  - **No authentication.** Don't expose the API to the internet 
+           without something in front of it.
+      237  - **No input size limits.** Very large titles, descriptions or
+            request bodies are accepted.
+      238 -- No editing of a task's title, description or priority, and n
+          -o way to mark a task incomplete.                              
+      238 +- No editing of a task's title, description, priority or due d
+          +ate, and no way to mark a task incomplete.                    
+      239 +- "Overdue" compares due dates with the server's UTC date. The
+          +re are no times of day or time zones.                         
+
+  Ran 2 shell commands (ctrl+o to expand)
+
+● Tasks now have an optional due date, and GET /tasks/overdue lists the overdue
+  ones. All 140 tests pass: the earlier 94, 46 of them new. The changes are
+  uncommitted.
+
+  Behaviour
+  - Due date: POST /tasks takes an optional due_date in strict YYYY-MM-DD form.
+    If omitted or null, the task has no due date and due_date is null. A date in
+    the past is allowed.
+  - Strict parsing: Python's date.fromisoformat also accepts 20261022 and week
+    dates, so I check the format with a pattern first. Impossible dates
+    (2026-02-30, 2025-02-29), date-times, padded strings and non-strings all
+    return 400 with due_date must be a valid date in YYYY-MM-DD format.
+  - Overdue: a task is overdue if it is not completed and its due date is before
+    today's UTC date. A task due today is not overdue until tomorrow. Results
+    are ordered by due date, most overdue first, then by creation order. Query
+    parameters are ignored, including priority.
+  - Fields: due_date appears on every task response, and completing a task
+    leaves it unchanged.
+
+  Design choices
+  - Date only: I used dates rather than datetimes, so there is no time of day or
+    time zone to handle. If you want deadlines with times, that is a different
+    feature.
+  - Injectable clock: "overdue" depends on today's date, so the service takes a
+    clock (create_app(clock=...)). Tests fix the date, which makes the "due
+    today" boundary and a clock that moves forward testable. One test uses the
+    real clock.
+  - Separate endpoint: overdue is a derived view of incomplete, past-due tasks,
+    so I gave it its own endpoint rather than a GET /tasks filter. It is
+    computed on each request and never stored.
+  - Routing: /tasks/overdue never matches the <int:task_id> routes. DELETE 
+    /tasks/overdue returns a JSON 405 and PATCH /tasks/overdue/complete
+    returns 404.
+
+  Tests
+  - Due-date tests cover valid and null dates, leap days, 18 invalid formats and
+    types, and that a rejected create stores nothing.
+  - Overdue tests cover:
+    - past, today, future, undated and completed tasks;
+    - ordering, and ordering ties;
+    - deleted tasks;
+    - read-only behaviour;
+    - the clock moving forward;
+    - routing.
+  - One service-level test.
+  - I also started the app on a real server. A task due 2000-01-01 showed up as
+    overdue and disappeared once completed, and a bad date returned 400.
+
+  I updated docs/user-stories.md (new US-9 and US-10, plus the scope list),
+  docs/architecture.md and the README. Two things are still out of scope:
+  changing a due date after creation, and combining the overdue list with the
+  priority filter.
+
+✻ Sautéed for 1m 55s · done 5:47 PM
+
+❯ export module5.txt                                                            
+
+● I can't run that myself. /export is a built-in Claude Code command, and only
+  you can run it from the prompt. This is the command to type:
+
+  /export module5.txt
+
+  The file lands in your current working directory, /workshop/task-manager. If
+  you want it somewhere else, give a full path. I haven't created module5.txt.
+
+  The export is of the conversation transcript. If you want a written summary of
+  the work instead, tell me and I'll write one as a file.
+
+  Since /workshop/task-manager is now its own git repo, an exported module5.txt
+  will show up as untracked there. You can add it to .gitignore or leave it out
+  of commits.
+
+✻ Churned for 6s · done 5:48 PM
